@@ -9,7 +9,13 @@ try:
     # 這裡的 "GEMINI_KEY" 要跟你在後台設定的名稱一樣
     MY_GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
     genai.configure(api_key=MY_GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    generation_config = {
+    "temperature": 0.1,  # 接近 0 確保每次輸出高度一致
+    "top_p": 0.95,
+    "max_output_tokens": 2048,
+    }
+    model = genai.GenerativeModel(model_name='gemini-2.5-flash',
+                                 generation_config=generation_config)
 except Exception as e:
     st.error("❌ 找不到 API Key 或設定錯誤，請檢查 Streamlit Secrets 設定。")
     st.stop() # 停止執行後續程式
@@ -33,13 +39,24 @@ if uploaded_file is not None:
             full_text = "".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
             # AI 分析指令
-            prompt = f"""
-            你是一位專業分析師。請針對以下週報內容，提取重點並以適合手機閱讀的格式輸出：
-            1. 【大盤總結】：本週核心多空觀點、壓力與支撐。
-            2. 【關鍵產業】：列出 2-3 個最具潛力的族群與原因。
-            3. 【焦點個股】：列出週報提到的重點股（名稱代碼、看好理由）。
+           prompt = f"""
+            你是一位嚴謹的台股量化分析師。你的任務是從「週報原文」中提取核心資訊，並將其標準化以供資料庫儲存。
             
-            內容如下：
+            ### 執行規則：
+            1. **客觀優先**：只提取原文提到的事實與數據，不加入個人推測。
+            2. **標籤歸一化**：從以下【標準族群清單】中選擇最符合的標籤，不要自創。
+               【標準族群清單】：AI伺服器、半導體、設備、機器人、電力電纜、重電、散熱、PCB、車用、原物料。
+            3. **穩定格式**：請嚴格依照下方的結構輸出，不要有任何多餘的解釋文字。
+            
+            ### 輸出結構：
+            
+            【大盤情緒】：(請從：極度樂觀、偏多、震盪、偏空、極度悲觀 中選一個)
+            【核心觀點】：(用一句話總結本週最重要的大盤結論，限 30 字內)
+            【族群標籤】：(從標準清單選取，用逗號隔開)
+            【重點個股】：(格式為：代碼 名稱 - 核心動能摘要，例如：3035 智原 - 先進製程案量提升)
+            【詳細分析】：(300字以內的核心細節整理)
+            
+            ### 週報原文：
             {full_text[:12000]}
             """
 
