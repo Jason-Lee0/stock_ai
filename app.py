@@ -3,32 +3,41 @@ import google.generativeai as genai
 from pypdf import PdfReader
 import io
 
-# 1. 網頁基礎設定 (優化手機顯示)
+# ==========================================
+# 1. 直接永存您的 API Key (在此替換)
+# ==========================================
+MY_GEMINI_API_KEY = "AIzaSyC73yQvhiVh0b4JtmpiU0GrPnYIYBXQURI" 
+# ==========================================
+
+# 網頁基礎設定
 st.set_page_config(page_title="股籌 AI 分析助手", layout="centered")
 
-# 2. 安全地讀取 API Key (建議在部署平台設定為 Secret)
-# 如果在本地測試，請直接替換為 "你的API_KEY"
-gemini_key = st.sidebar.text_input("請輸入 Gemini API Key", type="password")
+# 初始化 Gemini
+try:
+    genai.configure(api_key=MY_GEMINI_API_KEY)
+    # 使用包含 -latest 的名稱來避免 404 錯誤
+    model = genai.GenerativeModel('gemini-pro')
+except Exception as e:
+    st.error(f"API 設定失敗: {e}")
 
-if gemini_key:
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+st.title("📱 股籌週報 AI 分析助手")
+st.markdown("---")
 
-    st.title("📱 股籌週報 AI 分析助手")
-    st.markdown("---")
+# 檔案上傳區
+uploaded_file = st.file_uploader("📤 上傳週報 PDF", type="pdf")
 
-    # 3. 檔案上傳區
-    uploaded_file = st.file_uploader("📤 上傳週報 PDF", type="pdf")
-
-    if uploaded_file is not None:
-        with st.spinner('Gemini 正在深入閱讀週報中，請稍候...'):
+if uploaded_file is not None:
+    with st.spinner('Gemini 正在深入閱讀週報中...'):
+        try:
             # 讀取 PDF 文字
             reader = PdfReader(uploaded_file)
             full_text = ""
             for page in reader.pages:
-                full_text += page.extract_text()
+                text = page.extract_text()
+                if text:
+                    full_text += text
 
-            # 4. 設計專業的 AI 提示詞 (Prompt)
+            # 專業分析指令
             prompt = f"""
             你是一位專業的台灣股市分析師。請針對以下週報內容進行結構化整理，輸出格式必須非常適合手機閱讀。
             
@@ -38,40 +47,20 @@ if gemini_key:
             3. **【個股動能】**：針對週報中提到最關鍵的個股，列出名稱代碼及一兩句核心亮點。
             
             週報內容：
-            {full_text[:10000]}  # 限制字數避免超過 token
+            {full_text[:12000]} 
             """
 
-            # 5. 呼叫 Gemini 並顯示結果
-            try:
-                response = model.generate_content(prompt)
-                
-                # 顯示 AI 分析結果
-                st.subheader("💡 AI 整理精華")
-                st.markdown(response.text)
-                
-                st.success("✅ 分析完成")
-                
-            except Exception as e:
-                st.error(f"分析發生錯誤: {e}")
+            # 呼叫 Gemini
+            response = model.generate_content(prompt)
+            
+            # 顯示結果
+            st.subheader("💡 AI 整理精華")
+            st.markdown(response.text)
+            st.success("✅ 分析完成")
+            
+        except Exception as e:
+            st.error(f"分析發生錯誤: {e}")
 
-else:
-    st.warning("👈 請在左側選單輸入您的 Gemini API Key 以啟動服務。")
-
-# 6. 底部導覽列模擬 (CSS 優化)
-st.markdown("""
-    <style>
-    .report-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        background-color: #0e1117;
-        padding: 10px;
-        text-align: center;
-        border-top: 1px solid #334155;
-    }
-    </style>
-    <div class="report-footer">
-        <span style="color: #38bdf8; font-size: 12px;">週報整理 | 股票篩選(開發中) | 籌碼分析(開發中)</span>
-    </div>
-    """, unsafe_allow_html=True)
+# 底部簡單選單
+st.markdown("---")
+st.caption("目前功能：週報整理 | 開發中：股票篩選、籌碼分析")
