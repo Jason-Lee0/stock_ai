@@ -1,66 +1,61 @@
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-import io
 
 # ==========================================
-# 1. 直接永存您的 API Key (在此替換)
+# 🔐 從 Streamlit Secrets 自動讀取密鑰
 # ==========================================
-MY_GEMINI_API_KEY = "AIzaSyC73yQvhiVh0b4JtmpiU0GrPnYIYBXQURI" 
+try:
+    # 這裡的 "GEMINI_KEY" 要跟你在後台設定的名稱一樣
+    MY_GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
+    genai.configure(api_key=MY_GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+except Exception as e:
+    st.error("❌ 找不到 API Key 或設定錯誤，請檢查 Streamlit Secrets 設定。")
+    st.stop() # 停止執行後續程式
 # ==========================================
 
-# 網頁基礎設定
+# 網頁基礎設定 (手機優化)
 st.set_page_config(page_title="股籌 AI 分析助手", layout="centered")
 
-# 初始化 Gemini
-try:
-    genai.configure(api_key=MY_GEMINI_API_KEY)
-    # 使用包含 -latest 的名稱來避免 404 錯誤
-    model = genai.GenerativeModel('gemini-pro')
-except Exception as e:
-    st.error(f"API 設定失敗: {e}")
-
 st.title("📱 股籌週報 AI 分析助手")
+st.caption("2026 智慧投資版 | 上傳即分析")
 st.markdown("---")
 
 # 檔案上傳區
-uploaded_file = st.file_uploader("📤 上傳週報 PDF", type="pdf")
+uploaded_file = st.file_uploader("📤 請選擇週報 PDF 文件", type="pdf")
 
 if uploaded_file is not None:
-    with st.spinner('Gemini 正在深入閱讀週報中...'):
+    with st.spinner('Gemini 正在拆解週報內容...'):
         try:
-            # 讀取 PDF 文字
+            # 讀取 PDF
             reader = PdfReader(uploaded_file)
-            full_text = ""
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    full_text += text
+            full_text = "".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
-            # 專業分析指令
+            # AI 分析指令
             prompt = f"""
-            你是一位專業的台灣股市分析師。請針對以下週報內容進行結構化整理，輸出格式必須非常適合手機閱讀。
+            你是一位專業分析師。請針對以下週報內容，提取重點並以適合手機閱讀的格式輸出：
+            1. 【大盤總結】：本週核心多空觀點、壓力與支撐。
+            2. 【關鍵產業】：列出 2-3 個最具潛力的族群與原因。
+            3. 【焦點個股】：列出週報提到的重點股（名稱代碼、看好理由）。
             
-            請分為以下三個區塊整理：
-            1. **【大盤風向】**：用一句話總結本週情緒，並列出支撐、壓力位。
-            2. **【產業雷達】**：提取本週最重要的 3 個產業趨勢。
-            3. **【個股動能】**：針對週報中提到最關鍵的個股，列出名稱代碼及一兩句核心亮點。
-            
-            週報內容：
-            {full_text[:12000]} 
+            內容如下：
+            {full_text[:12000]}
             """
 
-            # 呼叫 Gemini
             response = model.generate_content(prompt)
             
-            # 顯示結果
-            st.subheader("💡 AI 整理精華")
-            st.markdown(response.text)
+            # 顯示結果卡片
+            st.markdown("### 💡 AI 整理精華")
+            st.info(response.text)
             st.success("✅ 分析完成")
             
         except Exception as e:
-            st.error(f"分析發生錯誤: {e}")
+            st.error(f"分析失敗：{e}")
 
-# 底部簡單選單
+# 底部簡單版導覽
 st.markdown("---")
-st.caption("目前功能：週報整理 | 開發中：股票篩選、籌碼分析")
+cols = st.columns(3)
+cols[0].button("📄 週報整理", use_container_width=True)
+cols[1].button("🔍 股票篩選", use_container_width=True, disabled=True)
+cols[2].button("📊 籌碼分析", use_container_width=True, disabled=True)
