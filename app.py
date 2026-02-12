@@ -9,7 +9,7 @@ try:
     # 這裡的 "GEMINI_KEY" 要跟你在後台設定的名稱一樣
     MY_GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
     genai.configure(api_key=MY_GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-pro')
 except Exception as e:
     st.error("❌ 找不到 API Key 或設定錯誤，請檢查 Streamlit Secrets 設定。")
     st.stop() # 停止執行後續程式
