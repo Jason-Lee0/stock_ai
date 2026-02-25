@@ -45,58 +45,64 @@ def get_stock_performance(stock_id):
 st.title("📂 股票專業週報分析系統")
 tab1, tab2, tab3 = st.tabs(["🚀 上傳更新", "📅 歷史回溯診斷", "📚 雲端資料庫"])
 
-# --- Tab 1: 上傳與當週分析 ---
 with tab1:
     st.subheader("📤 上傳本週週報")
-    uploaded_file = st.file_uploader("請上傳 PDF 週報檔案", type="pdf")
+    uploaded_file = st.file_uploader("請上傳 PDF 週報檔案", type="pdf", key="pdf_uploader")
     
     if uploaded_file:
-        with st.spinner('專業分析員閱卷中...'):
-            # 提取文字
-            reader = PdfReader(uploaded_file)
-            current_text = "".join([p.extract_text() for p in reader.pages if p.extract_text()])
-            
-            # 讀取歷史以供 AI 比對
-            try:
-                history_df = conn.read(worksheet="Sheet1")
-                history_context = history_df.tail(5).to_string() if not history_df.empty else "尚無歷史紀錄"
-            except:
-                history_df = pd.DataFrame()
-                history_context = "尚未建立資料表"
+        # 建立一個容器，方便重新分析時刷新內容
+        analysis_container = st.empty()
+        
+        # 提取文字 (移到外面避免重複讀取檔案)
+        reader = PdfReader(uploaded_file)
+        current_text = "".join([p.extract_text() for p in reader.pages if p.extract_text()])
 
-            # 專業 Prompt
-            prompt = f"""
-            你是一位專業股票分析員。請針對「當週週報」進行分類，並參考「歷史紀錄」來對比趨勢變化。
+        # 定義分析函式
+        def run_analysis():
+            with st.spinner('專業分析員閱卷中...'):
+                try:
+                    history_df = conn.read(worksheet="Sheet1")
+                    history_context = history_df.tail(5).to_string() if not history_df.empty else "尚無歷史紀錄"
+                except:
+                    history_df = pd.DataFrame()
+                    history_context = "尚未建立資料表"
 
-            ### 歷史紀錄參考：
-            {history_context}
+                prompt = f"""
+                你是一位股票專業週報分析員。請針對「當週週報」進行分類，並參考「歷史紀錄」來對比趨勢變化。
+                ### 歷史紀錄參考：
+                {history_context}
+                ### 當週週報內容：
+                {current_text[:12000]}
+                ### 任務要求：
+                1. 分類資訊：提取「核心主題、產業族群、提及原因時間、個股亮點」。
+                2. 趨勢比對：若族群或個股已在歷史中出現，標註【動能延續】；若新出現標註【新啟動】。
+                """
+                return model.generate_content(prompt), history_df
 
-            ### 當週週報內容：
-            {current_text[:12000]}
+        # 初始執行分析
+        if "analysis_result" not in st.session_state or st.button("🔄 重新分析"):
+            response, history_df = run_analysis()
+            st.session_state.analysis_result = response.text
+            st.session_state.history_df = history_df
 
-            ### 任務要求：
-            1. 分類資訊：提取「核心主題、產業族群、提及原因時間、個股亮點」。
-            2. 趨勢比對：若族群或個股已在歷史中出現，請標註【動能延續】；若新出現標註【新啟動】。
-            3. 外銷數據：若有提到外銷訂單數據則整理，無則跳過。
-            """
+        # 顯示結果
+        st.markdown("### 💡 本週分析報告")
+        st.info(st.session_state.analysis_result)
 
-            response = model.generate_content(prompt)
-            st.markdown("### 💡 本週分析報告")
-            st.info(response.text)
-
-            # 儲存功能
-            if st.button("📥 確認存入雲端資料庫"):
-                new_row = pd.DataFrame([{
-                    "日期": datetime.now().strftime("%Y-%m-%d"),
-                    "核心主題": "已分析內容", # 可根據 Prompt 優化解析
-                    "產業族群": "偵測族群中",
-                    "重點個股": ", ".join(extract_stock_ids(response.text)),
-                    "完整報告": response.text
-                }])
-                updated_df = pd.concat([history_df, new_row], ignore_index=True)
-                conn.update(worksheet="Sheet1", data=updated_df)
-                st.success("✅ 資料已同步至 Google Sheets！")
-
+        # 儲存功能
+        if st.button("📥 確認存入雲端資料庫"):
+            # 使用 session_state 中的結果存檔
+            sids = extract_stock_ids(st.session_state.analysis_result)
+            new_row = pd.DataFrame([{
+                "日期": datetime.now().strftime("%Y-%m-%d"),
+                "核心主題": "已分析內容", 
+                "產業族群": "偵測族群中",
+                "重點個股": ", ".join(sids),
+                "完整報告": st.session_state.analysis_result
+            }])
+            updated_df = pd.concat([st.session_state.history_df, new_row], ignore_index=True)
+            conn.update(worksheet="Sheet1", data=updated_df)
+            st.success("✅ 資料已同步至 Google Sheets！")
 # --- Tab 2: 歷史回溯與即時診斷 ---
 with tab2:
     st.subheader("📅 歷史標的回顧與 AI 診斷")
