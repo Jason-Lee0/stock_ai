@@ -45,98 +45,64 @@ def get_stock_performance(stock_id):
 st.title("📂 股票專業週報分析系統")
 tab1, tab2, tab3 = st.tabs(["🚀 上傳更新", "📅 歷史回溯診斷", "📚 雲端資料庫"])
 with tab1:
-    st.subheader("📤 上傳與當週分析")
+    st.subheader("📤 上傳與深度分析")
     
-    # 使用列配置讓按鈕橫向排列
     up_col1, up_col2 = st.columns([3, 1])
     with up_col1:
         uploaded_file = st.file_uploader("請上傳 PDF 週報檔案", type="pdf")
     with up_col2:
-        st.write("") # 調整間距
-        st.write("") 
         re_analyze = st.button("🔄 重新執行 AI 分析")
 
-    # 邏輯控制：當檔案存在，且 (尚未分析過 OR 使用者點擊重新分析)
     if uploaded_file:
         if 'ai_analysis' not in st.session_state or re_analyze:
-            with st.spinner('專業分析員正在深度閱卷中...'):
-                try:
-                    # 1. 提取 PDF 文字
-                    reader = PdfReader(uploaded_file)
-                    current_text = "".join([p.extract_text() for p in reader.pages if p.extract_text()])
-                    
-                    # 2. 讀取歷史紀錄 (給 AI 參考趨勢)
-                    try:
-                        history_df = conn.read(worksheet="Sheet1")
-                        history_context = history_df.tail(5).to_string() if not history_df.empty else "尚無歷史紀錄"
-                    except:
-                        history_df = pd.DataFrame()
-                        history_context = "尚未建立資料表"
-
-                    # 3. 呼叫 Gemini
-                    # 獲取檔案日期 (嘗試從檔名抓取，若無則用今天)
-                    file_date = re.search(r'\d{4}-\d{2}-\d{2}', uploaded_file.name)
-                    st.session_state.report_date = file_date.group(0) if file_date else datetime.now().strftime("%Y-%m-%d")
-
-                    prompt = f"""
-你是一位專業股票分析員，擅長從複雜的週報（含文字、表格、圖表）中提取結構化資訊。
-
-### 任務要求：
-1. **全面掃描**：請分析週報中提到的所有「產業主題」，包含文字敘述、表格中的個股清單、以及圖表標註的標的。
-2. **精簡輸出**：請嚴格依照下方格式輸出，原因請濃縮在 10 個字以內（例如：'報價上漲'、'訂單回流'），以利後續資料標記。
-3. **對象分類**：請針對各個主題分別列出。
-
-### 輸出格式範例：
-【主題】：機器人
-- 原因：川普政策紅利、自動化需求
-- 標的：3035 智原、2359 所羅門
-
-【主題】：光通訊
-- 原因：CPO 技術趨勢、北美需求
-- 標的：3363 上詮、4977 眾達-KY
-
----
-### 當週週報內容：
-{current_text[:12000]}
-"""
-
-                    response = model.generate_content(prompt)
-                    # 將結果存入暫存，避免頁面重新整理時消失
-                    st.session_state.ai_analysis = response.text
-                    st.session_state.stock_ids = ", ".join(extract_stock_ids(response.text))
+            with st.spinner('專業分析員正在從文字與圖表中提取標籤...'):
+                reader = PdfReader(uploaded_file)
+                current_text = "".join([p.extract_text() for p in reader.pages if p.extract_text()])
                 
-                except Exception as e:
-                    st.error(f"分析過程發生錯誤: {e}")
+                # 優化後的 Prompt：針對主題、短原因、標的
+                prompt = f"""
+                你是一位股票專業週報分析員。請針對週報中的各個主題（含文字、表格及圖表）進行分析。
+                請嚴格依照以下格式輸出，不准有前言或結語：
 
-        # --- 顯示分析結果 ---
+                【題材】：(產業名稱)
+                - 原因：(限 10 字以內，例如：報價上漲、政策紅利)
+                - 標的：(4位數代碼+名稱，多個請用逗號隔開)
+
+                【題材】：(下一個主題...)
+                ...
+
+                週報原文內容：
+                {current_text[:15000]}
+                """
+                
+                response = model.generate_content(prompt)
+                st.session_state.ai_analysis = response.text
+                st.session_state.stock_ids = ", ".join(extract_stock_ids(response.text))
+                st.session_state.report_date = re.search(r'\d{4}-\d{2}-\d{2}', uploaded_file.name).group(0) if re.search(r'\d{4}-\d{2}-\d{2}', uploaded_file.name) else datetime.now().strftime("%Y-%m-%d")
+
+        # --- 顯示與存入 ---
         if 'ai_analysis' in st.session_state:
-            st.markdown("---")
-            st.markdown(f"### 💡 {st.session_state.report_date} 分析報告")
-            st.info(st.session_state.ai_analysis)
+            st.markdown(f"### 💡 {st.session_state.report_date} 分析結果")
+            st.code(st.session_state.ai_analysis) # 使用 code 區塊顯示更整齊，不易卡頓
 
-            # --- 存入資料庫區塊 ---
-            st.write("確認無誤後，將分析結果存入雲端備份：")
-            if st.button("📥 寫入 Google Sheets 資料庫"):
-                try:
-                    # 再次讀取最新資料以免覆蓋
-                    current_db = conn.read(worksheet="Sheet1")
-                    new_entry = pd.DataFrame([{
-                        "日期": st.session_state.report_date,
-                        "核心主題": "本週趨勢分析", # 可進階解析摘要
-                        "產業族群": "自動偵測中",
-                        "重點個股": st.session_state.stock_ids,
-                        "完整報告": st.session_state.ai_analysis
-                    }])
-                    
-                    updated_db = pd.concat([current_db, new_entry], ignore_index=True)
-                    conn.update(worksheet="Sheet1", data=updated_db)
-                    st.success(f"✅ 已成功將 {st.session_state.report_date} 紀錄存入！")
-                    # 清除暫存，防止重複存入
-                    # del st.session_state.ai_analysis 
-                except Exception as e:
-                    st.error(f"存入失敗：{e}\n請確認您已將 Google Sheets 分享給 JSON 裡的 client_email 並設為編輯者。")
-    else:
-        st.write("👋 歡迎回來！請上傳週報 PDF 開始進行專業分析。")
+            with st.form("save_to_sheets"):
+                st.write("檢查摘要無誤後存入資料庫：")
+                submit = st.form_submit_button("📥 確定寫入 Google Sheets")
+                if submit:
+                    try:
+                        db = conn.read(worksheet="Sheet1")
+                        new_data = pd.DataFrame([{
+                            "日期": st.session_state.report_date,
+                            "核心主題": "多題材掃描",
+                            "產業族群": "自動標籤",
+                            "重點個股": st.session_state.stock_ids,
+                            "完整報告": st.session_state.ai_analysis[:5000] # 限制存入字數防止超時
+                        }])
+                        updated_db = pd.concat([db, new_data], ignore_index=True)
+                        conn.update(worksheet="Sheet1", data=updated_db)
+                        st.success("✅ 已同步至雲端！現在可以去『歷史回溯』診斷這些標的了。")
+                    except Exception as e:
+                        st.error(f"存入失敗：{e}")
 # --- Tab 2: 歷史回溯與即時診斷 ---
 with tab2:
     st.subheader("📅 歷史標的回顧與 AI 診斷")
