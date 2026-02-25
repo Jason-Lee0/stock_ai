@@ -1,5 +1,5 @@
 streamlit
 google-generativeai
 pypdf
-streamlit-gsheets
+st-gsheets-connection
 yfinance
