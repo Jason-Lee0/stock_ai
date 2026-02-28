@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- 1. 系統初始化與設定 ---
-st.set_page_config(page_title="AI 飆股診斷系統 v4.0", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="AI 飆股診斷系統 v4.1", layout="wide", page_icon="🛡️")
 
 try:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
@@ -27,7 +27,6 @@ except Exception as e:
 # --- 2. 核心邏輯函式 ---
 
 def get_taiwan_stock_tickers():
-    """使用 twstock 獲取精確的上櫃/上市股票清單"""
     all_codes = twstock.codes
     taiwan_tickers = []
     for code, info in all_codes.items():
@@ -40,30 +39,24 @@ def get_taiwan_stock_tickers():
     return list(set(taiwan_tickers))
 
 def check_breakout_dna_stable(ticker, g_limit, v_limit):
-    """
-    高穩定偵測引擎：含重試機制與固定日期區間，確保假日結果不變。
-    """
-    # 假日穩定邏輯：如果是假日，end_date 固定為週五
     today = datetime.date.today()
-    if today.weekday() >= 5: # 週六(5)或週日(6)
+    if today.weekday() >= 5:
         end_date = today - datetime.timedelta(days=today.weekday() - 4)
     else:
         end_date = today
-    start_date = end_date - datetime.timedelta(days=400) # 確保足夠天數算年線
+    start_date = end_date - datetime.timedelta(days=400)
 
-    for attempt in range(3): # 重試 3 次
+    for attempt in range(3):
         try:
             df = yf.Ticker(ticker).history(start=start_date, end=end_date)
             if df.empty or len(df) < 245: return None
             
-            # 指標計算
             df['MA5'] = df['Close'].rolling(5).mean()
             df['MA10'] = df['Close'].rolling(10).mean()
             df['MA20'] = df['Close'].rolling(20).mean()
             df['MA60'] = df['Close'].rolling(60).mean()
             df['MA240'] = df['Close'].rolling(240).mean()
             
-            # MACD
             exp1 = df['Close'].ewm(span=12, adjust=False).mean()
             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
             df['DIF'] = exp1 - exp2
@@ -73,13 +66,11 @@ def check_breakout_dna_stable(ticker, g_limit, v_limit):
             last = df.iloc[-1]
             prev = df.iloc[-2]
             
-            # 四捨五入避免浮點數誤差
             ma_list = [last['MA5'], last['MA10'], last['MA20']]
             gap = round((max(ma_list) / min(ma_list) - 1) * 100, 2)
             vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
             v_ratio = round(last['Volume'] / vol_avg20, 2) if vol_avg20 > 0 else 1
             
-            # 偵測條件：均線糾結 + 量縮 + 季線上揚 + 股價在季線上
             is_ma60_up = last['MA60'] > df['MA60'].iloc[-5]
             if gap <= g_limit and v_ratio <= v_limit and last['Close'] > last['MA60'] and is_ma60_up:
                 return {
@@ -96,7 +87,6 @@ def check_breakout_dna_stable(ticker, g_limit, v_limit):
     return None
 
 def plot_interactive_chart(ticker):
-    """繪製含年線與成交量子圖的 K 線診斷圖"""
     try:
         df = yf.Ticker(ticker).history(period="300d")
         df['MA5'] = df['Close'].rolling(5).mean()
@@ -107,14 +97,11 @@ def plot_interactive_chart(ticker):
         colors = ['red' if df['Close'].iloc[i] >= df['Open'].iloc[i] else 'green' for i in range(len(df))]
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
         
-        # K線與均線
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="K線"), row=1, col=1)
         for ma, color in zip(['MA5', 'MA20', 'MA60', 'MA240'], ['white', 'yellow', 'orange', 'purple']):
             fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=color, width=1.5)), row=1, col=1)
         
-        # 成交量
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="成交量", marker_color=colors, showlegend=False), row=2, col=1)
-        
         fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False, margin=dict(l=5, r=5, t=50, b=5))
         return fig
     except: return None
@@ -122,7 +109,6 @@ def plot_interactive_chart(ticker):
 # --- 3. UI 介面佈局 ---
 tab1, tab2, tab3, tab4 = st.tabs(["📄 週報解析", "📅 歷史診斷", "📚 資料庫明細", "⚡ 飆股偵測器"])
 
-# 預載資料庫
 try:
     db = conn.read(worksheet="Sheet1")
 except:
@@ -160,10 +146,10 @@ with tab3:
     if not db.empty:
         search_q = st.text_input("🔍 搜尋代碼或題材關鍵字")
         display_db = db[db.astype(str).apply(lambda x: x.str.contains(search_q)).any(axis=1)]
-        st.dataframe(display_db, use_container_width=True)
+        st.dataframe(display_db, width='stretch') # 已修正
     else: st.info("資料庫目前沒有數據。")
 
-# --- Tab 4: 飆股偵測器 (多線程高速版) ---
+# --- Tab 4: 飆股偵測器 ---
 with tab4:
     st.subheader("⚡ 飆股 DNA 大數據掃描")
     col_l, col_r = st.columns(2)
@@ -203,9 +189,7 @@ with tab4:
                 st.session_state.last_hits = hits
                 res_df = pd.DataFrame(hits)
                 res_df.columns = ['代號', '現價', '糾結(%)', '量比', '長線屬性', '動能']
-                st.dataframe(res_df.sort_values('糾結(%)'), use_container_width=True)
-                
-                # 下載按鈕
+                st.dataframe(res_df.sort_values('糾結(%)'), width='stretch') # 已修正
                 csv = res_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("📥 下載今日偵測清單", csv, "hits.csv", "text/csv")
             else: st.warning("查無符合 DNA 的標的。")
@@ -215,4 +199,4 @@ with tab4:
         selected = st.selectbox("🎯 點選標的查看手機版診斷圖", [h['sid'] for h in st.session_state.last_hits])
         if selected:
             fig = plot_interactive_chart(selected)
-            if fig: st.plotly_chart(fig, use_container_width=True)
+            if fig: st.plotly_chart(fig, width='stretch') # 已修正
