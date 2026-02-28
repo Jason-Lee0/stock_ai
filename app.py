@@ -50,7 +50,17 @@ def check_breakout_dna_stable(ticker, g_limit, v_limit):
         try:
             df = yf.Ticker(ticker).history(start=start_date, end=end_date)
             if df.empty or len(df) < 245: return None
+            last = df.iloc[-1]
+            vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
             
+            # --- 新增：流動性過濾器 ---
+            # Yahoo Finance 的 Volume 是「股數」，所以要除以 1000 變成「張數」
+            current_vol_lots = last['Volume'] / 1000 
+            avg_vol_lots = vol_avg20 / 1000
+            
+            # 如果今天不到 500 張，或是平均不到 300 張，直接跳過
+            if current_vol_lots < min_volume or avg_vol_lots < 300:
+                return None
             df['MA5'] = df['Close'].rolling(5).mean()
             df['MA10'] = df['Close'].rolling(10).mean()
             df['MA20'] = df['Close'].rolling(20).mean()
