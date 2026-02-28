@@ -209,5 +209,4 @@ with tab4:
                 st.dataframe(res_df, width="stretch")
             else:
                 st.info("目前選定範圍內，尚無標的同時滿足「均線糾結」與「縮量」條件。")
-            else:
-                st.info("目前選定範圍內，尚無標的同時滿足「均線糾結」與「縮量」條件。")
+
