@@ -157,14 +157,17 @@ with tab2:
 # --- Tab 3: 資料庫明細 ---
 with tab3:
     st.subheader("📚 雲端資料庫清單")
-    # 修正：使用 width=None 或指定寬度取代 use_container_width
-    st.dataframe(db, width=None)
+    # 修正：2026 Streamlit 規範，使用 width="stretch" 填滿寬度
+    if not db.empty:
+        st.dataframe(db, width="stretch")
+    else:
+        st.info("目前資料庫內沒有數據。")
 
 # --- Tab 4: ⚡ 飆股偵測器 ---
 with tab4:
     st.subheader("⚡ 尋找起漲點：均線糾結 + 窒息量掃描")
     
-    
+    # 
     
     mode = st.radio("掃描模式", ["從資料庫標的找機會", "全台股/自定義範圍掃描"], horizontal=True)
     
@@ -172,7 +175,10 @@ with tab4:
     if mode == "從資料庫標的找機會":
         if not db.empty:
             all_sids = []
-            for s in db['標的']: all_sids.extend(extract_stock_ids(s))
+            # 修正：加入 str() 轉換與 pd.notna 判斷，防止 float 錯誤
+            for s in db['標的']: 
+                clean_s = str(s) if pd.notna(s) else ""
+                all_sids.extend(extract_stock_ids(clean_s))
             search_list = list(set(all_sids))
             st.write(f"🔍 目前監控資料庫中 {len(search_list)} 檔標的...")
         else:
@@ -199,6 +205,9 @@ with tab4:
                 st.success(f"🎊 發現 {len(results)} 檔符合起漲特徵！")
                 res_df = pd.DataFrame(results).drop(columns=['is_ready'])
                 res_df.columns = ['股票代號', '目前價格', '均線糾結度(%)', '成交量比']
-                st.table(res_df)
+                # 這裡也同步修正寬度設定
+                st.dataframe(res_df, width="stretch")
+            else:
+                st.info("目前選定範圍內，尚無標的同時滿足「均線糾結」與「縮量」條件。")
             else:
                 st.info("目前選定範圍內，尚無標的同時滿足「均線糾結」與「縮量」條件。")
