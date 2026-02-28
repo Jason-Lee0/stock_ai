@@ -116,6 +116,22 @@ def plot_interactive_chart(ticker):
         return fig
     except: return None
 
+
+# --- 1. 定義彈出視窗函式 ---
+@st.dialog("📈 飆股 DNA 深度診斷", width="large")
+def show_stock_dialog(ticker):
+    st.write(f"### 正在診斷：{ticker}")
+    with st.spinner("載入大數據 K 線圖..."):
+        fig = plot_interactive_chart(ticker)
+        if fig:
+            st.plotly_chart(fig, width='stretch')
+        else:
+            st.error("無法載入此標的之圖表。")
+    
+    # 底部加上關閉按鈕，方便手機操作
+    if st.button("關閉診斷", use_container_width=True):
+        st.rerun()
+
 # --- 3. UI 介面佈局 ---
 tab1, tab2, tab3, tab4 = st.tabs(["📄 週報解析", "📅 歷史診斷", "📚 資料庫明細", "⚡ 飆股偵測器"])
 
@@ -161,6 +177,20 @@ with tab3:
 
 # --- Tab 4: 飆股偵測器 ---
 # --- Tab 4: 飆股偵測器 (修正後的穩定記憶版) ---
+# --- 1. 定義彈出視窗函式 ---
+@st.dialog("📈 飆股 DNA 深度診斷", width="large")
+def show_stock_dialog(ticker):
+    st.write(f"### 正在診斷：{ticker}")
+    with st.spinner("載入大數據 K 線圖..."):
+        fig = plot_interactive_chart(ticker)
+        if fig:
+            st.plotly_chart(fig, width='stretch')
+        else:
+            st.error("無法載入此標的之圖表。")
+    
+    # 底部加上關閉按鈕，方便手機操作
+    if st.button("關閉診斷", use_container_width=True):
+        st.rerun()
 with tab4:
     st.subheader("⚡ 飆股 DNA 大數據掃描")
     col_l, col_r = st.columns(2)
@@ -206,25 +236,30 @@ with tab4:
                 st.session_state.final_hits_df = None
                 st.warning("查無符合 DNA 的標的。")
 
-    # --- 關鍵修正：不論是否點擊按鈕，只要 session_state 有資料就顯示 ---
     if 'final_hits_df' in st.session_state and st.session_state.final_hits_df is not None:
-        st.write("### 🔍 偵測結果清單")
-        st.dataframe(st.session_state.final_hits_df, width='stretch')
+        st.write("### 🔍 偵測結果 (點選任一行直接彈出診斷)")
         
-        # 下載功能也放在這裡
+        # 設定表格點擊事件
+        event = st.dataframe(
+            st.session_state.final_hits_df,
+            width='stretch',
+            on_select="rerun",
+            selection_mode="single",
+            hide_index=True,
+            column_config={
+                "代號": st.column_config.TextColumn("代號", disabled=True),
+                "現價": st.column_config.NumberColumn("現價", disabled=True),
+                # ... 其他欄位設定
+            }
+        )
+
+        # 關鍵：偵測到點擊時，呼叫彈出視窗
+        if event.selection.rows:
+            selected_index = event.selection.rows[0]
+            selected_sid = st.session_state.final_hits_df.iloc[selected_index]['代號']
+            # 觸發彈出視窗
+            show_stock_dialog(selected_sid)
+
+        # 保留原有的下載按鈕
         csv = st.session_state.final_hits_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載今日偵測清單", csv, "hits.csv", "text/csv")
-        
-        st.divider()
-        
-        # 點選看圖
-        selected = st.selectbox(
-            "🎯 點選標的查看手機版診斷圖", 
-            st.session_state.final_hits_df['代號'].tolist()
-        )
-        
-        if selected:
-            with st.spinner(f'正在繪製 {selected} 診斷圖...'):
-                fig = plot_interactive_chart(selected)
-                if fig: 
-                    st.plotly_chart(fig, width='stretch')
