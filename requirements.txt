@@ -5,3 +5,4 @@ st-gsheets-connection
 yfinance
 pandas
 plotly
+twstock
