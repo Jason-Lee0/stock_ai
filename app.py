@@ -38,7 +38,7 @@ def get_taiwan_stock_tickers():
             taiwan_tickers.append(f"{code}.TWO")
     return list(set(taiwan_tickers))
 
-def check_breakout_dna_stable(ticker, g_limit, v_limit):
+def check_breakout_dna_stable(ticker, g_limit, v_limit, min_volume=500):
     today = datetime.date.today()
     if today.weekday() >= 5:
         end_date = today - datetime.timedelta(days=today.weekday() - 4)
