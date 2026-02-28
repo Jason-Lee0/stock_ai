@@ -163,50 +163,83 @@ with tab3:
     else:
         st.info("目前資料庫內沒有數據。")
 
-# --- Tab 4: ⚡ 飆股偵測器 ---
+# --- Tab 4: ⚡ 飆股偵測器 (雙模式：資料庫 vs 全台股) ---
 with tab4:
-    st.subheader("⚡ 尋找起漲點：均線糾結 + 窒息量掃描")
+    st.subheader("⚡ 尋找起漲點：均線糾結 + 窒息量偵測")
     
-    # 
+    # 模式選擇
+    scan_mode = st.radio("選擇掃描範圍", ["資料庫內的題材股", "掃描全台股 (1101~9960)"], horizontal=True)
     
-    mode = st.radio("掃描模式", ["從資料庫標的找機會", "全台股/自定義範圍掃描"], horizontal=True)
-    
+    # 門檻設定 (讓使用者微調，增加靈活性)
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        gap_threshold = st.slider("均線糾結門檻 (%)", 1.0, 5.0, 3.5, 0.5, help="數值越小代表籌碼越集中")
+    with col_p2:
+        vol_threshold = st.slider("窒息量門檻 (倍)", 0.1, 1.0, 0.75, 0.05, help="數值越小代表賣壓越乾淨")
+
+    # 準備掃描清單
     search_list = []
-    if mode == "從資料庫標的找機會":
+    if scan_mode == "資料庫內的題材股":
         if not db.empty:
             all_sids = []
-            # 修正：加入 str() 轉換與 pd.notna 判斷，防止 float 錯誤
             for s in db['標的']: 
                 clean_s = str(s) if pd.notna(s) else ""
                 all_sids.extend(extract_stock_ids(clean_s))
             search_list = list(set(all_sids))
-            st.write(f"🔍 目前監控資料庫中 {len(search_list)} 檔標的...")
+            st.info(f"🔍 模式：資料庫精準監控 (共 {len(search_list)} 檔)")
         else:
-            st.warning("資料庫是空的，請先解析週報。")
+            st.warning("資料庫目前是空的，請先解析週報 PDF。")
     else:
-        raw_input = st.text_area("輸入自定義代碼 (逗號分隔)", "6187, 3363, 3450, 2338, 4977, 8183, 2493, 3017")
-        search_list = [s.strip() for s in raw_input.split(",") if s.strip()]
+        # 建立全台股代碼池 (1101~9960)
+        # 註：這會包含一些不存在的號碼，但 check_breakout_dna 會自動跳過
+        search_list = [str(i) for i in range(1101, 9961)]
+        st.info("🚀 模式：全台股大數據掃描 (預計需時 2-5 分鐘)")
 
-    if st.button("🚀 開始 DNA 掃描"):
-        if search_list:
+    # 執行掃描按鈕
+    if st.button("🏁 開始 DNA 篩選"):
+        if not search_list:
+            st.error("掃描清單為空，請確認資料庫數據。")
+        else:
             results = []
-            bar = st.progress(0)
+            progress_bar = st.progress(0)
             status_text = st.empty()
             
-            for i, sid in enumerate(search_list):
-                status_text.text(f"正在分析 {sid}...")
-                res = check_breakout_dna(sid)
-                if res and res['is_ready']:
-                    results.append(res)
-                bar.progress((i + 1) / len(search_list))
+            start_time = time.time()
+            total_count = len(search_list)
             
-            status_text.empty()
+            # 遍歷清單
+            for i, sid in enumerate(search_list):
+                # 每 10 檔更新一次文字，避免畫面閃爍過快
+                if i % 10 == 0 or i == total_count - 1:
+                    status_text.text(f"正在分析: {sid} ({i}/{total_count})")
+                
+                # 呼叫技術面檢查函式
+                res = check_breakout_dna(sid)
+                
+                # 符合使用者設定的門檻才納入
+                if res and res['gap'] <= gap_threshold and res['v_ratio'] <= vol_threshold:
+                    # check_breakout_dna 內部已包含 price > MA60 判斷
+                    results.append(res)
+                
+                # 更新進度條
+                progress_bar.progress((i + 1) / total_count)
+            
+            end_time = time.time()
+            status_text.success(f"掃描完成！總耗時: {int(end_time - start_time)} 秒")
+            
             if results:
-                st.success(f"🎊 發現 {len(results)} 檔符合起漲特徵！")
+                st.success(f"🎊 發現 {len(results)} 檔符合起漲特徵的標的！")
+                
+                # 整理成 DataFrame
                 res_df = pd.DataFrame(results).drop(columns=['is_ready'])
                 res_df.columns = ['股票代號', '目前價格', '均線糾結度(%)', '成交量比']
-                # 這裡也同步修正寬度設定
+                
+                # 依據『均線糾結度』排序 (越小越好)
+                res_df = res_df.sort_values(by='均線糾結度(%)', ascending=True)
+                
+                # 顯示表格 (使用 2026 最新規範 width="stretch")
                 st.dataframe(res_df, width="stretch")
+                
+                st.caption("💡 專業建議：優先觀察均線糾結度 < 2% 且成交量比 < 0.5 的標的，代表爆發力最強。")
             else:
-                st.info("目前選定範圍內，尚無標的同時滿足「均線糾結」與「縮量」條件。")
-
+                st.info("目前選定範圍內，尚無標的同時滿足設定的起漲條件。")
