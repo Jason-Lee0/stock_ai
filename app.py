@@ -49,7 +49,7 @@ def check_breakout_dna(sid):
     try:
         suffix = ".TW" if int(sid) < 9000 else ".TWO"
         t = yf.Ticker(f"{sid}{suffix}")
-        df = t.history(period="65d") # 抓取足夠天數計算 MA60
+        df = t.history(period="65d") 
         if len(df) < 60: return None
         
         # 計算指標
@@ -59,14 +59,4 @@ def check_breakout_dna(sid):
         df['MA60'] = df['Close'].rolling(60).mean()
         
         last = df.iloc[-1]
-        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
-        
-        # 1. 均線糾結度
-        ma_list = [last['MA5'], last['MA10'], last['MA20']]
-        ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
-        
-        # 2. 量比
-        v_ratio = last['Volume'] / vol_avg20 if vol_avg20 > 0 else 1
-        
-        # 3. 判定條件
-        is_ready = (ma_gap < 3.5) and (v_ratio < 0.75) and (last['Close'] > last['MA60'])
+        vol_avg
