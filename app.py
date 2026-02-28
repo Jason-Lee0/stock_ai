@@ -150,6 +150,7 @@ with tab3:
     else: st.info("資料庫目前沒有數據。")
 
 # --- Tab 4: 飆股偵測器 ---
+# --- Tab 4: 飆股偵測器 (修正後的穩定記憶版) ---
 with tab4:
     st.subheader("⚡ 飆股 DNA 大數據掃描")
     col_l, col_r = st.columns(2)
@@ -159,6 +160,7 @@ with tab4:
         g_limit = st.slider("糾結度 (%)", 1.0, 5.0, 3.5)
         v_limit = st.slider("量比門檻 (窒息量)", 0.1, 1.2, 0.75)
 
+    # 按鈕觸發掃描
     if st.button("🏁 開始執行高速偵測"):
         search_list = []
         if mode == "資料庫題材股":
@@ -185,18 +187,34 @@ with tab4:
                         status.text(f"已掃描: {i+1} / {len(search_list)} 檔...")
 
             status.success(f"⚡ 掃描完成！耗時: {int(time.time()-start_time)} 秒")
+            
+            # --- 關鍵修正：將結果存入 session_state ---
             if hits:
-                st.session_state.last_hits = hits
-                res_df = pd.DataFrame(hits)
-                res_df.columns = ['代號', '現價', '糾結(%)', '量比', '長線屬性', '動能']
-                st.dataframe(res_df.sort_values('糾結(%)'), width='stretch') # 已修正
-                csv = res_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 下載今日偵測清單", csv, "hits.csv", "text/csv")
-            else: st.warning("查無符合 DNA 的標的。")
+                st.session_state.final_hits_df = pd.DataFrame(hits).sort_values('gap')
+                st.session_state.final_hits_df.columns = ['代號', '現價', '糾結(%)', '量比', '長線屬性', '動能']
+            else:
+                st.session_state.final_hits_df = None
+                st.warning("查無符合 DNA 的標的。")
 
-    if 'last_hits' in st.session_state:
+    # --- 關鍵修正：不論是否點擊按鈕，只要 session_state 有資料就顯示 ---
+    if 'final_hits_df' in st.session_state and st.session_state.final_hits_df is not None:
+        st.write("### 🔍 偵測結果清單")
+        st.dataframe(st.session_state.final_hits_df, width='stretch')
+        
+        # 下載功能也放在這裡
+        csv = st.session_state.final_hits_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 下載今日偵測清單", csv, "hits.csv", "text/csv")
+        
         st.divider()
-        selected = st.selectbox("🎯 點選標的查看手機版診斷圖", [h['sid'] for h in st.session_state.last_hits])
+        
+        # 點選看圖
+        selected = st.selectbox(
+            "🎯 點選標的查看手機版診斷圖", 
+            st.session_state.final_hits_df['代號'].tolist()
+        )
+        
         if selected:
-            fig = plot_interactive_chart(selected)
-            if fig: st.plotly_chart(fig, width='stretch') # 已修正
+            with st.spinner(f'正在繪製 {selected} 診斷圖...'):
+                fig = plot_interactive_chart(selected)
+                if fig: 
+                    st.plotly_chart(fig, width='stretch')
