@@ -24,9 +24,10 @@ except Exception as e:
 # --- 2. 核心邏輯函式 ---
 
 def extract_stock_ids(text):
-    """從文字中提取 4 位數台股代碼"""
+    """從文字中提取 4 位數台股代碼，並自動處理非字串資料"""
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ""
     return re.findall(r'\b\d{4}\b', text)
-
 def get_stock_perf(sid):
     """獲取台股即時行情與漲跌幅"""
     try:
