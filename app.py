@@ -236,30 +236,35 @@ with tab4:
                 st.session_state.final_hits_df = None
                 st.warning("查無符合 DNA 的標的。")
 
-    if 'final_hits_df' in st.session_state and st.session_state.final_hits_df is not None:
-        st.write("### 🔍 偵測結果 (點選任一行直接彈出診斷)")
+  if 'final_hits_df' in st.session_state and st.session_state.final_hits_df is not None:
+        st.write("### 🔍 偵測結果 (點選任一橫列直接彈出診斷)")
         
-        # 設定表格點擊事件
+        # 修正點：selection_mode 從 "single" 改為 "single-row"
         event = st.dataframe(
             st.session_state.final_hits_df,
             width='stretch',
             on_select="rerun",
-            selection_mode="single",
+            selection_mode="single-row",  # 這裡要改成 single-row
             hide_index=True,
             column_config={
                 "代號": st.column_config.TextColumn("代號", disabled=True),
                 "現價": st.column_config.NumberColumn("現價", disabled=True),
-                # ... 其他欄位設定
+                "糾結(%)": st.column_config.NumberColumn("糾結(%)", disabled=True),
+                "量比": st.column_config.NumberColumn("量比", disabled=True),
+                "長線屬性": st.column_config.TextColumn("長線屬性", disabled=True),
+                "動能": st.column_config.TextColumn("動能", disabled=True),
             }
         )
 
-        # 關鍵：偵測到點擊時，呼叫彈出視窗
+        # 偵測點擊列的事件邏輯也需要微調
         if event.selection.rows:
-            selected_index = event.selection.rows[0]
-            selected_sid = st.session_state.final_hits_df.iloc[selected_index]['代號']
-            # 觸發彈出視窗
+            selected_row_index = event.selection.rows[0]
+            # 取得選中那一列的「代號」
+            selected_sid = st.session_state.final_hits_df.iloc[selected_row_index]['代號']
+            
+            # 觸發我們之前定義好的彈出視窗
             show_stock_dialog(selected_sid)
 
-        # 保留原有的下載按鈕
+        # 下載按鈕 (這部分保持不變)
         csv = st.session_state.final_hits_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 下載今日偵測清單", csv, "hits.csv", "text/csv")
