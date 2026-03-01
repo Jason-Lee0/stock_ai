@@ -42,9 +42,12 @@ def get_taiwan_stock_tickers():
     return sorted(list(set(taiwan_tickers)))
 
 def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
+    today = datetime.date.today()
+    end_date = today - datetime.timedelta(days=today.weekday() - 4) if today.weekday() >= 5 else today
+    start_date = end_date - datetime.timedelta(days=400)
     try:
-        df = yf.Ticker(ticker).history(period="400d")
-        if len(df) < 245: return None
+        df = yf.Ticker(ticker).history(start=start_date, end=end_date)
+        if df.empty or len(df) < 245: return None
         last = df.iloc[-1]
         
         # 1. 流動性過濾
