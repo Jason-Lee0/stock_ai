@@ -49,39 +49,30 @@ def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
         df = yf.Ticker(ticker).history(start=start_date, end=end_date)
         if df.empty or len(df) < 245: return None
         last = df.iloc[-1]
+        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
+        if (last['Volume'] / 1000) < min_vol_lots: return None
         
-        # 1. 流動性過濾
-        if (last['Volume'] / 1000) < min_v: return None
+        df['MA5'] = df['Close'].rolling(5).mean()
+        df['MA10'] = df['Close'].rolling(10).mean()
+        df['MA20'] = df['Close'].rolling(20).mean()
+        df['MA60'] = df['Close'].rolling(60).mean()
+        df['MA240'] = df['Close'].rolling(240).mean()
         
-        # 2. 計算均線
-        ma5 = df['Close'].rolling(5).mean().iloc[-1]
-        ma10 = df['Close'].rolling(10).mean().iloc[-1]
-        ma20 = df['Close'].rolling(20).mean().iloc[-1]
-        ma60 = df['Close'].rolling(60).mean().iloc[-1]
-        ma240 = df['Close'].rolling(240).mean().iloc[-1]
+        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+        macd_hist = (exp1 - exp2) - (exp1 - exp2).ewm(span=9, adjust=False).mean()
         
-        # 3. 季年線位階 (MA60 vs MA240)
-        ma_bias = round(((ma60 / ma240) - 1) * 100, 2)
-        if not (bias_range[0] <= ma_bias <= bias_range[1]): return None
-        
-        # 4. 短線糾結度 (5, 10, 20MA)
-        ma_list = [ma5, ma10, ma20]
+        ma_list = [df['MA5'].iloc[-1], df['MA10'].iloc[-1], df['MA20'].iloc[-1]]
         gap = round((max(ma_list) / min(ma_list) - 1) * 100, 2)
+        v_ratio = round(last['Volume'] / vol_avg20, 2)
         
-        # 5. 成交量比 (窒息量)
-        v_ratio = round(last['Volume'] / df['Volume'].rolling(20).mean().iloc[-1], 2)
-        
-        if gap <= g_limit and v_ratio <= v_limit:
-            pure_sid = re.search(r'\d{4}', ticker).group(0)
-            info = twstock.codes.get(pure_sid)
+        if gap <= g_limit and v_ratio <= v_limit and last['Close'] > df['MA60'].iloc[-1]:
             return {
-                "代號": ticker, "名稱": info.name if info else "未知",
-                "類股": info.category if info else "其他", "現價": round(last['Close'], 2),
-                "短線糾結(%)": gap, "季年位階(%)": ma_bias, "量比": v_ratio,
-                "位階屬性": "📈 多頭起漲" if ma_bias > 0 else "🩹 底部補漲"
+                "代號": ticker, "現價": round(last['Close'], 2), "糾結(%)": gap, "量比": v_ratio,
+                "長線屬性": "🚀 長線無壓" if last['Close'] > df['MA240'].iloc[-1] else "🩹 補漲股",
+                "動能": "🔥 轉強" if macd_hist.iloc[-1] > macd_hist.iloc[-2] else "⏳ 整理"
             }
     except: return None
-
 def get_historical_theme_ai(ticker, name):
     try:
         df = yf.download(ticker, period="6mo", progress=False)
