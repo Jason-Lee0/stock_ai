@@ -187,7 +187,7 @@ with tab4:
                         prog.progress((i+1)/len(search_list))
                         status.text(f"掃描中: {i+1}/{len(search_list)}")
             st.session_state.v53_results = pd.DataFrame(hits)
-            status.success(f"⚡ 完成！發現 {len(hits)} 檔符合標的。")
+            status.success(f"⚡ 完成！發現 {len(hits)} / {len(search_list)}檔符合標的。")
 
     # --- 關鍵：點擊表格觸發 K線圖 ---
     if st.session_state.v53_results is not None and not st.session_state.v53_results.empty:
