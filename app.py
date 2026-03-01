@@ -42,27 +42,48 @@ def get_taiwan_stock_tickers():
     return sorted(list(set(taiwan_tickers)))
 
 def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
-    """穩定版掃描引擎"""
     try:
-        df = yf.download(ticker, period="400d", progress=False, show_errors=False)
-        if df.empty or len(df) < 240: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        # 1. 使用你提議的 Ticker 模式，並確保不輸出下載進度條
+        stock_obj = yf.Ticker(ticker)
+        df = stock_obj.history(period="400d")
+        
+        # 2. 基本長度檢查 (排除新股)
+        if df.empty or len(df) < 245: return None
+        
+        # 3. 處理 yfinance 可能產生的 MultiIndex (這是最常導致「無資料」的原因)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        # 4. 數據清洗：移除無效交易日 (如週末產生的空數據)
         df = df[df['Volume'] > 0].dropna()
+        
+        # 5. 二次長度檢查
         if len(df) < 240: return None
         
+        # --- 以下計算邏輯保持不變 ---
         last = df.iloc[-1]
+        
+        # 單位換算：張數 (Volume / 1000)
         if (last['Volume'] / 1000) < min_v: return None
         
         close = df['Close']
-        ma5, ma10, ma20 = close.rolling(5).mean().iloc[-1], close.rolling(10).mean().iloc[-1], close.rolling(20).mean().iloc[-1]
-        ma60, ma240 = close.rolling(60).mean().iloc[-1], close.rolling(240).mean().iloc[-1]
+        ma5 = close.rolling(5).mean().iloc[-1]
+        ma10 = close.rolling(10).mean().iloc[-1]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ma60 = close.rolling(60).mean().iloc[-1]
+        ma240 = close.rolling(240).mean().iloc[-1]
         
+        # 季年位階過濾
         ma_bias = round(((ma60 / ma240) - 1) * 100, 2)
         if use_bias and not (bias_range[0] <= ma_bias <= bias_range[1]): return None
         
+        # 短線糾結度 (5, 10, 20MA)
         ma_list = [float(ma5), float(ma10), float(ma20)]
         gap = round((max(ma_list) / min(ma_list) - 1) * 100, 2)
-        v_ratio = round(last['Volume'] / df['Volume'].rolling(20).mean().iloc[-1], 2)
+        
+        # 量比 (窒息量判斷)
+        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
+        v_ratio = round(last['Volume'] / vol_avg20, 2)
         
         if gap <= g_limit and v_ratio <= v_limit:
             pure_sid = re.search(r'\d{4}', ticker).group(0)
@@ -73,7 +94,9 @@ def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
                 "短線糾結(%)": gap, "季年位階(%)": ma_bias, "量比": v_ratio,
                 "屬性": "📈 多頭" if ma_bias > 0 else "🩹 底部"
             }
-    except: return None
+    except Exception as e:
+        # print(f"Error scanning {ticker}: {e}") # 除錯用
+        return None
 
 def get_historical_theme_ai(ticker, name):
     try:
