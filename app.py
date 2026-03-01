@@ -48,7 +48,9 @@ def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
         df = stock_obj.history(period="400d")
         
         # 2. 基本長度檢查 (排除新股)
-        if df.empty or len(df) < 245: return None
+        if df.empty or len(df) < 245: 
+            print("none")
+            return None
         
         # 3. 處理 yfinance 可能產生的 MultiIndex (這是最常導致「無資料」的原因)
         if isinstance(df.columns, pd.MultiIndex):
