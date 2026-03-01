@@ -43,7 +43,7 @@ def get_taiwan_stock_tickers():
 
 def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
     try:
- df = yf.Ticker(ticker).history(period="400d")
+        df = yf.Ticker(ticker).history(period="400d")
         if len(df) < 245: return None
         last = df.iloc[-1]
         
