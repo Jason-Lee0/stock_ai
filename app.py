@@ -13,25 +13,26 @@ import concurrent.futures
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- 1. 系統初始化 ---
-st.set_page_config(page_title="AI 飆股診斷 v5.3", layout="wide", page_icon="🛡️")
+# --- 1. 系統初始化 (行動端寬度自適應) ---
+st.set_page_config(page_title="AI 飆股診斷 v5.5", layout="wide", page_icon="🛡️")
 
-# 初始化 Session State
-for key in ['v53_results', 'raw_json', 'rep_date', 'backtest_df']:
-    if key not in st.session_state: st.session_state[key] = None
+# 初始化記憶體，確保手機翻轉或刷新時數據不遺失
+for key in ['v55_results', 'raw_json', 'rep_date', 'backtest_df']:
+    if key not in st.session_state:
+        st.session_state[key] = None
 
 try:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
     model = genai.GenerativeModel('gemini-2.0-flash') 
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error(f"系統初始化失敗: {e}")
+    st.error(f"系統初始化失敗，請檢查 Secrets 設定: {e}")
     st.stop()
 
-# --- 2. 核心運算函式 ---
+# --- 2. 核心運算引擎 (採用 Ticker 穩定模式) ---
 
 def get_taiwan_stock_tickers():
-    """獲取台股代碼"""
+    """獲取台股清單並排除非個股標的"""
     all_codes = twstock.codes
     taiwan_tickers = []
     for code, info in all_codes.items():
@@ -41,101 +42,121 @@ def get_taiwan_stock_tickers():
         taiwan_tickers.append(f"{code}{suffix}")
     return sorted(list(set(taiwan_tickers)))
 
-def check_breakout_v53(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
-    today = datetime.date.today()
-    end_date = today - datetime.timedelta(days=today.weekday() - 4) if today.weekday() >= 5 else today
-    start_date = end_date - datetime.timedelta(days=400)
+def check_breakout_v55(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
+    """均線糾結 + 位階過濾偵測核心"""
     try:
-        df = yf.Ticker(ticker).history(start=start_date, end=end_date)
+        stock_obj = yf.Ticker(ticker)
+        df = stock_obj.history(period="400d")
+        
         if df.empty or len(df) < 245: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        
+        # 數據清洗：移除無效交易日與 NaN
+        df = df[df['Volume'] > 0].dropna()
+        if len(df) < 240: return None
+        
         last = df.iloc[-1]
-        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
-        if (last['Volume'] / 1000) < min_vol_lots: return None
+        # 成交張數過濾 (Volume/1000)
+        if (last['Volume'] / 1000) < min_v: return None
         
-        df['MA5'] = df['Close'].rolling(5).mean()
-        df['MA10'] = df['Close'].rolling(10).mean()
-        df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA60'] = df['Close'].rolling(60).mean()
-        df['MA240'] = df['Close'].rolling(240).mean()
+        close = df['Close']
+        ma5, ma10, ma20 = close.rolling(5).mean().iloc[-1], close.rolling(10).mean().iloc[-1], close.rolling(20).mean().iloc[-1]
+        ma60, ma240 = close.rolling(60).mean().iloc[-1], close.rolling(240).mean().iloc[-1]
         
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        macd_hist = (exp1 - exp2) - (exp1 - exp2).ewm(span=9, adjust=False).mean()
+        # 季年位階篩選 (可選功能)
+        ma_bias = round(((ma60 / ma240) - 1) * 100, 2)
+        if use_bias and not (bias_range[0] <= ma_bias <= bias_range[1]): return None
         
-        ma_list = [df['MA5'].iloc[-1], df['MA10'].iloc[-1], df['MA20'].iloc[-1]]
+        # 短線 5/10/20MA 糾結度計算
+        ma_list = [float(ma5), float(ma10), float(ma20)]
         gap = round((max(ma_list) / min(ma_list) - 1) * 100, 2)
+        
+        # 成交量比 (與20日均量相比)
+        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
         v_ratio = round(last['Volume'] / vol_avg20, 2)
         
-        if gap <= g_limit and v_ratio <= v_limit and last['Close'] > df['MA60'].iloc[-1]:
+        if gap <= g_limit and v_ratio <= v_limit:
+            pure_sid = re.search(r'\d{4}', ticker).group(0)
+            info = twstock.codes.get(pure_sid)
             return {
-                "代號": ticker, "現價": round(last['Close'], 2), "糾結(%)": gap, "量比": v_ratio,
-                "長線屬性": "🚀 長線無壓" if last['Close'] > df['MA240'].iloc[-1] else "🩹 補漲股",
-                "動能": "🔥 轉強" if macd_hist.iloc[-1] > macd_hist.iloc[-2] else "⏳ 整理"
+                "代號": ticker, "名稱": info.name if info else "未知",
+                "類股": info.category if info else "其他", "現價": round(float(last['Close']), 2),
+                "糾結(%)": gap, "位階(%)": ma_bias, "量比": v_ratio,
+                "屬性": "📈 多頭" if ma_bias > 0 else "🩹 底部"
             }
     except: return None
+
 def get_historical_theme_ai(ticker, name):
+    """AI 考古：分析該股半年內最強利多"""
     try:
         df = yf.download(ticker, period="6mo", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df['Pct'] = df['Close'].pct_change()
         max_day = df['Pct'].idxmax()
-        prompt = f"分析台股 {name}({ticker})。該股在 {max_day.strftime('%Y-%m-%d')} 大幅上漲。請簡述利多原因(40字內)。"
-        return f"📅 {max_day.strftime('%Y-%m-%d')} 考古：{model.generate_content(prompt).text}"
-    except: return "考古暫時失敗"
+        date_str = max_day.strftime('%Y-%m-%d')
+        prompt = f"分析台股 {name}({ticker})。該股在 {date_str} 前後大幅上漲。請簡述利多原因（如營收、題材、產品），限 40 字。"
+        return f"📅 {date_str} 考古：{model.generate_content(prompt).text}"
+    except: return "AI 考古分析暫時無法載入。"
 
-def plot_v53(ticker):
+def plot_stock_chart(ticker):
+    """繪製專業 K 線圖"""
     df = yf.download(ticker, period="300d", progress=False)
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     for p in [5, 20, 60, 240]: df[f'MA{p}'] = df['Close'].rolling(p).mean()
+    
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="K線"), row=1, col=1)
     for ma, col in zip(['MA5','MA20','MA60','MA240'], ['white','yellow','orange','purple']):
         fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=col, width=1.5)), row=1, col=1)
-    v_cols = ['red' if df['Close'].iloc[i] >= df['Open'].iloc[i] else 'green' for i in range(len(df))]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="成交量", marker_color=v_cols), row=2, col=1)
+    
+    v_colors = ['red' if df['Close'].iloc[i] >= df['Open'].iloc[i] else 'green' for i in range(len(df))]
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="量", marker_color=v_colors), row=2, col=1)
+    
     fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, margin=dict(l=5, r=5, t=10, b=5))
     return fig
 
 @st.dialog("🚀 AI 飆股診斷室", width="large")
-def show_stock_v53(ticker, name):
+def show_diagnosis(ticker, name):
     st.write(f"### {name} ({ticker})")
-    with st.spinner("AI 考古中..."):
+    with st.spinner("AI 正在翻閱歷史檔案..."):
         st.info(get_historical_theme_ai(ticker, name))
-    chart = plot_v53(ticker)
-    if chart: st.plotly_chart(chart, use_container_width=True)
+    st.plotly_chart(plot_stock_chart(ticker), use_container_width=True)
     if st.button("關閉診斷", use_container_width=True): st.rerun()
 
-# --- 3. UI 介面 ---
+# --- 3. UI 介面配置 ---
 
-tab1, tab2, tab3, tab4 = st.tabs(["📄 週報提取", "📅 歷史表現", "📚 雲端資料庫", "⚡ 飆股偵測器"])
+tab1, tab2, tab3, tab4 = st.tabs(["📄 週報提取", "📈 績優回測", "📚 雲端庫", "⚡ 飆股偵測器"])
 
+# 載入雲端資料庫
 try:
-    db = conn.read(worksheet="Sheet1")
-    db = db.dropna(subset=['標的'])
+    db = conn.read(worksheet="Sheet1").dropna(subset=['標的'])
 except:
     db = pd.DataFrame(columns=['日期', '標的', '題材', '原因'])
 
 with tab1:
-    st.subheader("📄 AI 投顧週報標的提取")
-    pdf = st.file_uploader("上傳 PDF", type="pdf")
-    if pdf and st.button("🚀 啟動解析"):
+    st.subheader("📄 PDF 週報解析")
+    pdf = st.file_uploader("上傳投顧週報 PDF", type="pdf")
+    if pdf and st.button("🚀 啟動解析", use_container_width=True):
         reader = PdfReader(pdf)
         text = "".join([p.extract_text() for p in reader.pages])
-        res = model.generate_content(f"轉為 JSON (題材, 原因, 標的): {text[:8000]}").text
+        prompt = "將以下文字轉為 JSON 列表，包含(題材, 原因, 標的)。標的請保留數字代號。"
+        res = model.generate_content(f"{prompt}: {text[:8000]}").text
         st.session_state.raw_json = res
         st.session_state.rep_date = datetime.date.today().strftime("%Y-%m-%d")
+    
     if st.session_state.raw_json:
         st.code(st.session_state.raw_json)
-        if st.button("📥 存入雲端"):
+        if st.button("📥 存入 Google Sheets", use_container_width=True):
             clean = st.session_state.raw_json.replace('```json', '').replace('```', '').strip()
-            new = pd.DataFrame(json.loads(clean))
-            new['日期'] = st.session_state.rep_date
-            conn.update(worksheet="Sheet1", data=pd.concat([db, new], ignore_index=True))
-            st.success("存檔成功")
+            new_data = pd.DataFrame(json.loads(clean))
+            new_data['日期'] = st.session_state.rep_date
+            conn.update(worksheet="Sheet1", data=pd.concat([db, new_data], ignore_index=True))
+            st.success("數據已同步至雲端資料庫！")
 
 with tab2:
-    if st.button("📈 計算回測 (僅顯示最近10筆)"):
-        bt = []
+    st.subheader("📈 歷史表現回測")
+    if st.button("🏁 開始回測最近 10 筆標的", use_container_width=True):
+        bt_results = []
         for _, r in db.tail(10).iterrows():
             m = re.search(r'\d{4}', str(r['標的']))
             if m:
@@ -143,69 +164,68 @@ with tab2:
                 h = yf.download(s, start=r['日期'], progress=False)
                 if not h.empty:
                     p0, pn = h['Close'].iloc[0], h['Close'].iloc[-1]
-                    bt.append({"標的": r['標的'], "當初日期": r['日期'], "漲跌%": round(((pn/p0)-1)*100, 2)})
-        st.session_state.backtest_df = pd.DataFrame(bt)
-    if st.session_state.backtest_df is not None: 
-        st.dataframe(st.session_state.backtest_df.style.applymap(lambda x: 'color:red' if x > 0 else 'color:green', subset=['漲跌%']))
+                    bt_results.append({"標的": r['標的'], "推薦日": r['日期'], "漲跌(%)": round(((pn/p0)-1)*100, 2)})
+        st.session_state.backtest_df = pd.DataFrame(bt_results)
+    
+    if st.session_state.backtest_df is not None:
+        st.table(st.session_state.backtest_df.style.applymap(lambda x: 'color:red' if x > 0 else 'color:green', subset=['漲跌(%)']))
 
 with tab3:
-    st.subheader("📚 雲端監控庫")
-    st.dataframe(db, width='stretch')
+    st.subheader("📚 雲端監控庫內容")
+    st.dataframe(db, use_container_width=True, hide_index=True)
 
 with tab4:
     st.subheader("⚡ 飆股 DNA 高階偵測")
-    c1, c2, c3 = st.columns([1.2, 1, 1])
-    with c1:
-        mode = st.radio("範圍", ["全台股", "資料庫標的"], horizontal=True)
-        use_bias = st.checkbox("啟用季年位階過濾", value=True)
-        bias_range = st.slider("季年乖離 (%)", -30, 60, (-10, 25), disabled=not use_bias)
-    with c2:
-        g_limit = st.slider("短線糾結度 (%)", 1.0, 10.0, 4.0)
+    
+    # 手機優化控制項
+    mode = st.segmented_control("掃描範圍", ["全台股", "資料庫"], default="全台股")
+    
+    with st.expander("🛠️ 進階篩選參數 (手機建議預設)", expanded=False):
+        use_bias = st.toggle("開啟季年線位階篩選", value=True)
+        bias_range = st.slider("季年乖離區間 (%)", -30, 60, (-10, 25), disabled=not use_bias)
+        g_limit = st.slider("均線糾結度 (%)", 1.0, 10.0, 4.0)
+        v_limit = st.slider("量比門檻 (窒息量)", 0.1, 2.5, 0.8)
         min_v = st.number_input("最低成交量 (張)", value=300)
-    with c3:
-        v_limit = st.slider("成交量比 (窒息量)", 0.1, 2.5, 0.8)
 
-    if st.button("🏁 啟動深度掃描", use_container_width=True):
-        all_available = get_taiwan_stock_tickers()
+    if st.button("🏁 執行深度掃描", use_container_width=True, type="primary"):
+        all_tickers = get_taiwan_stock_tickers()
         if mode == "全台股":
-            search_list = all_available
+            search_list = all_tickers
         else:
             db_sids = [re.search(r'\d{4}', str(x)).group(0) for x in db['標的'] if re.search(r'\d{4}', str(x))]
-            search_list = [t for t in all_available if any(sid in t for sid in db_sids)]
+            search_list = [t for t in all_tickers if any(sid in t for sid in db_sids)]
         
         if search_list:
             hits = []
             prog, status = st.progress(0), st.empty()
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-                futures = {ex.submit(check_breakout_v53, s, g_limit, v_limit, min_v, bias_range, use_bias): s for s in search_list}
+                futures = {ex.submit(check_breakout_v55, s, g_limit, v_limit, min_v, bias_range, use_bias): s for s in search_list}
                 for i, f in enumerate(concurrent.futures.as_completed(futures)):
                     res = f.result()
                     if res: hits.append(res)
-                    if i % 10 == 0:
+                    if i % 15 == 0:
                         prog.progress((i+1)/len(search_list))
-                        status.text(f"掃描中: {i+1}/{len(search_list)}")
-            st.session_state.v53_results = pd.DataFrame(hits)
-            status.success(f"⚡ 完成！發現 {len(hits)} / {len(search_list)}檔符合標的。")
+                        status.text(f"掃描中: {i+1}/{len(search_list)}...")
+            
+            st.session_state.v55_results = pd.DataFrame(hits)
+            status.success(f"⚡ 完成！發現 {len(hits)} 檔標的。")
 
-    # --- 關鍵：點擊表格觸發 K線圖 ---
-    if st.session_state.v53_results is not None and not st.session_state.v53_results.empty:
-        st.write("---")
-        st.write("💡 **點選下方橫列**：自動展開 AI 診斷與多空 K 線圖")
+    if st.session_state.v55_results is not None and not st.session_state.v55_results.empty:
+        st.divider()
+        st.write("💡 **手機操作**：點擊下方表格內任一列即可查看詳細 K 線圖與 AI 分析。")
         event = st.dataframe(
-            st.session_state.v53_results, 
+            st.session_state.v55_results, 
             on_select="rerun", 
             selection_mode="single-row", 
             hide_index=True,
             use_container_width=True,
             column_config={
-                "短線糾結(%)": st.column_config.NumberColumn(format="%.2f%%"),
-                "季年位階(%)": st.column_config.NumberColumn(format="%.1f%%"),
-                "量比": st.column_config.NumberColumn(format="%.2f")
+                "現價": st.column_config.NumberColumn(format="$%.2f"),
+                "糾結(%)": st.column_config.NumberColumn(format="%.2f%%")
             }
         )
         
-        # 檢測是否有選中列
         if event.selection.rows:
-            selected_row_index = event.selection.rows[0]
-            row_data = st.session_state.v53_results.iloc[selected_row_index]
-            show_stock_v53(row_data['代號'], row_data['名稱'])
+            row_idx = event.selection.rows[0]
+            target = st.session_state.v55_results.iloc[row_idx]
+            show_diagnosis(target['代號'], target['名稱'])
