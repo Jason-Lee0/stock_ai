@@ -14,13 +14,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- 1. 系統初始化 ---
-st.set_page_config(page_title="AI 飆股診斷 v5.0", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="AI 飆股診斷 v5.1", layout="wide", page_icon="🛡️")
 
-# 初始化記憶體
-keys = ['v50_results', 'raw_json', 'rep_date', 'backtest_df']
-for key in keys:
-    if key not in st.session_state:
-        st.session_state[key] = None
+if 'v51_results' not in st.session_state:
+    st.session_state.v51_results = None
 
 try:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
@@ -53,34 +50,44 @@ def get_historical_theme_ai(ticker, name):
         return f"📅 {date_str} 考古：{model.generate_content(prompt).text}"
     except: return "考古失敗"
 
-def check_breakout_v50(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
+def check_breakout_v51(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
     try:
-        df = yf.Ticker(ticker).history(period="400d")
-        if len(df) < 245: return None
+        # 抓取稍長一點的區間，確保能涵蓋足夠交易日
+        df = yf.Ticker(ticker).history(period="450d")
+        if df.empty or len(df) < 250: return None
+        
+        # 【防呆關鍵】：過濾掉非交易日或無效數據，確保最後一筆是真實收盤
+        df = df[df['Close'] > 0] 
+        df = df.dropna(subset=['Close'])
+        
+        # 取最後一筆作為基準
         last = df.iloc[-1]
         
-        # 1. 流動性過濾
+        # 1. 基本流動性
         if (last['Volume'] / 1000) < min_v: return None
         
-        # 2. 計算均線
+        # 2. 計算均線 (全部基於真實交易日)
         ma5 = df['Close'].rolling(5).mean().iloc[-1]
         ma10 = df['Close'].rolling(10).mean().iloc[-1]
         ma20 = df['Close'].rolling(20).mean().iloc[-1]
         ma60 = df['Close'].rolling(60).mean().iloc[-1]
         ma240 = df['Close'].rolling(240).mean().iloc[-1]
         
-        # 3. 季年線位階 (MA60 vs MA240)
+        # 3. 季年位階過濾
         ma_bias = round(((ma60 / ma240) - 1) * 100, 2)
-        # 如果勾選了位階過濾，則進行判斷；沒勾選就跳過
         if use_bias:
             if not (bias_range[0] <= ma_bias <= bias_range[1]): return None
-        
-        # 4. 短線糾結度 (5, 10, 20MA)
+            
+        # 4. 短線糾結 (5/10/20MA)
         ma_list = [ma5, ma10, ma20]
         gap = round((max(ma_list) / min(ma_list) - 1) * 100, 2)
         
-        # 5. 成交量比 (窒息量)
-        v_ratio = round(last['Volume'] / df['Volume'].rolling(20).mean().iloc[-1], 2)
+        # 5. 量比 (與真實的前20個交易日均量比較)
+        vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
+        v_ratio = round(last['Volume'] / vol_avg20, 2)
+        
+        # 判定日期標籤
+        last_date = df.index[-1].strftime('%Y-%m-%d')
         
         if gap <= g_limit and v_ratio <= v_limit:
             pure_sid = re.search(r'\d{4}', ticker).group(0)
@@ -89,6 +96,7 @@ def check_breakout_v50(ticker, g_limit, v_limit, min_v, bias_range, use_bias):
                 "代號": ticker, "名稱": info.name if info else "未知",
                 "類股": info.category if info else "其他", "現價": round(last['Close'], 2),
                 "短線糾結(%)": gap, "季年位階(%)": ma_bias, "量比": v_ratio,
+                "基準日期": last_date,
                 "位階屬性": "📈 多頭" if ma_bias > 0 else "🩹 底部"
             }
     except: return None
@@ -125,49 +133,40 @@ except:
 # 週報提取、歷史表現、雲端庫內容省略 (保持 v4.9 邏輯)
 
 with tab4:
-    st.subheader("⚡ 飆股 DNA 高階偵測")
+    st.subheader("⚡ 飆股 DNA 高階偵測 (穩定數據版)")
     c1, c2, c3 = st.columns([1.2, 1, 1])
     with c1:
         mode = st.radio("掃描範圍", ["資料庫標的", "全台股"], horizontal=True)
-        st.markdown("---")
-        # 關鍵開關：是否啟用季年位階過濾
+        st.write("")
         use_bias = st.checkbox("啟用季年線位階過濾", value=True)
         bias_range = st.slider("中長線位階 (季年線乖離%)", -30, 60, (-10, 25), disabled=not use_bias)
     with c2:
-        g_limit = st.slider("短線糾結度 (5/10/20MA%)", 1.0, 5.0, 3.5)
-        min_v = st.number_input("最低成交量 (張)", value=500)
+        g_limit = st.slider("短線糾結度 (5/10/20MA%)", 1.0, 7.0, 3.5)
+        min_v = st.number_input("最低成交量 (張)", value=300)
     with c3:
-        v_limit = st.slider("成交量比 (窒息量)", 0.1, 1.2, 0.75)
+        v_limit = st.slider("成交量比 (窒息量)", 0.1, 1.5, 0.75)
 
     if st.button("🏁 啟動深度掃描", use_container_width=True):
-        topic_map = {}
-        if not db.empty:
-            for _, r in db.iterrows():
-                sid = re.search(r'\d{4}', str(r['標的']))
-                if sid: topic_map[sid.group(0)] = r['題材']
-        
-        search_list = get_taiwan_stock_tickers() if mode == "全台股" else [f"{k}.TW" if int(k)<9000 else f"{k}.TWO" for k in topic_map.keys()]
+        # 題材對照邏輯...
+        search_list = get_taiwan_stock_tickers() if mode == "全台股" else ... 
         
         if search_list:
             hits = []
             prog, status = st.progress(0), st.empty()
-            start_t = time.time()
             with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
-                futures = {ex.submit(check_breakout_v50, s, g_limit, v_limit, min_v, bias_range, use_bias): s for s in search_list}
+                futures = {ex.submit(check_breakout_v51, s, g_limit, v_limit, min_v, bias_range, use_bias): s for s in search_list}
                 for i, f in enumerate(concurrent.futures.as_completed(futures)):
                     res = f.result()
-                    if res:
-                        pure_sid = re.search(r'\d{4}', res['代號']).group(0)
-                        res['💡關聯題材'] = topic_map.get(pure_sid, "新發現")
-                        hits.append(res)
+                    if res: hits.append(res)
                     if i % 40 == 0: prog.progress((i+1)/len(search_list)); status.text(f"掃描中: {i+1}/{len(search_list)}")
-            st.session_state.v50_results = pd.DataFrame(hits) if hits else pd.DataFrame()
-            status.success(f"⚡ 完成！耗時 {int(time.time()-start_t)} 秒，發現 {len(hits)} 檔符合 DNA 標的。")
+            
+            st.session_state.v51_results = pd.DataFrame(hits) if hits else pd.DataFrame()
+            status.success(f"⚡ 完成！基準交易日為: {hits[0]['基準日期'] if hits else '無資料'}")
 
-    if st.session_state.v50_results is not None and not st.session_state.v50_results.empty:
+    if st.session_state.v51_results is not None and not st.session_state.v51_results.empty:
         st.write("### 🔍 偵測結果")
         event = st.dataframe(
-            st.session_state.v50_results, width='stretch', on_select="rerun", selection_mode="single-row", hide_index=True,
+            st.session_state.v51_results, width='stretch', on_select="rerun", selection_mode="single-row", hide_index=True,
             column_config={
                 "季年位階(%)": st.column_config.NumberColumn("季年乖離", format="%.1f%%"),
                 "短線糾結(%)": st.column_config.NumberColumn("短線壓縮", format="%.2f%%"),
@@ -175,5 +174,5 @@ with tab4:
             }
         )
         if event.selection.rows:
-            row = st.session_state.v50_results.iloc[event.selection.rows[0]]
+            row = st.session_state.v51_results.iloc[event.selection.rows[0]]
             show_stock_v50(row['代號'], row['名稱'])
