@@ -171,29 +171,36 @@ with tab3:
 
 with tab4:
     st.subheader("⚡ 策略偵測器")
-    # 策略選擇切換
-    mode = st.segmented_control("策略模式", ["💎 量縮糾結", "🌀 量縮回測", "🚀 帶量突破"], default="💎 量縮回測")
     
-    # 動態參數設定
+    # 定義選項清單，避免在函數中重複打字導致手殘出錯
+    strategy_options = ["💎 量縮糾結", "🌀 量縮回測", "🚀 帶量突破"]
+    
+    # 修正重點：default 必須完全等於 strategy_options 裡面的其中一個字串
+    mode = st.segmented_control(
+        "策略模式", 
+        strategy_options, 
+        default="🌀 量縮回測"  # 這裡要跟上面的 icon 一模一樣
+    )
+    
     with st.expander("🛠️ 參數與篩選設定", expanded=True):
         c1, c2, c3 = st.columns(3)
         p_min_v = c1.number_input("最低張數", value=300)
         p_dict = {'min_v': p_min_v}
         
+        # 使用 if mode == ... 判斷時也要注意字串內容
         if mode == "💎 量縮糾結":
             p_dict['gap'] = c2.slider("全線糾結度%", 1.0, 10.0, 5.0)
             p_dict['vol_ratio'] = c3.slider("量縮比", 0.1, 1.0, 0.6)
-            st.caption("🔍 條件：六線糾結 + 價格貼近 月/季/半年線 支撐區")
+            st.caption("🔍 條件：六線全糾結 + 價格貼近中長期均線支撐區")
             
         elif mode == "🌀 量縮回測":
             p_dict['short_gap'] = c2.slider("短線糾結% (5/10/20)", 1.0, 5.0, 3.0)
             p_dict['vol_ratio'] = c3.slider("量縮比門檻", 0.1, 1.0, 0.5)
             st.caption("🔍 條件：季/半年線上揚 + 均線乖離控制 + 縮量回測支撐線")
             
-        else:
+        elif mode == "🚀 帶量突破":
             p_dict['breakout_vol'] = c2.slider("量比倍數", 2.0, 5.0, 3.5)
             st.caption("🔍 條件：今日成交量爆發 + 股價站上 20MA 月線")
-
     # 執行與結果顯示 (邏輯維持穩定循序掃描)
     if st.button("🏁 開始執行掃描", type="primary", use_container_width=True):
         all_tickers = [f"{c}.TW" if i.market=="上市" else f"{c}.TWO" for c, i in twstock.codes.items() if c.isdigit() and len(c)==4]
