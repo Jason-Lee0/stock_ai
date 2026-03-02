@@ -82,58 +82,119 @@ def load_cached_market_data(_conn):
 # --- 2. 策略計算邏輯 (純記憶體運算，速度極快) ---
 
 def run_strategy_engine(df_c, df_v, mode, p):
+    """
+    df_c: 寬表格式收盤價 (pd.DataFrame)
+    df_v: 寬表格式成交量 (pd.DataFrame)
+    mode: 策略模式字串
+    p: 參數字典 (含 gap, vol_ratio, min_v, short_gap 等)
+    """
     hits = []
+    symbols = df_c.columns
+    total = len(symbols)
+    
+    # --- UI 監控元件初始化 ---
+    prog_bar = st.progress(0)
+    status_txt = st.empty()
+    hit_count_txt = st.empty()
+    
     # 取得最新一天的日期
     last_date = df_c.index[-1]
-    symbols = df_c.columns
     
-    for s in symbols:
+    for i, s in enumerate(symbols):
+        # 每 20 檔更新一次 UI，展現輪動感並保持效能
+        if i % 20 == 0:
+            status_txt.text(f"🔍 正在掃描標的: {s} ({i+1}/{total})")
+            prog_bar.progress((i+1)/total)
+            hit_count_txt.caption(f"🎯 目前符合策略標的數: {len(hits)}")
+            
         try:
+            # 提取單檔數據並移除 NaN (加速運算)
             prices = df_c[s].dropna()
             volumes = df_v[s].dropna()
+            
+            # 基礎門檻：數據長度與今日張數
             if len(prices) < 240: continue
             
-            close_p = prices.iloc[-1]
-            vol_today = volumes.iloc[-1]
+            close_p = float(prices.iloc[-1])
+            vol_today = float(volumes.iloc[-1])
             shares = vol_today / 1000
             
-            # A. 基礎張數過濾
+            # 1. 通用門檻：最低張數限制
             if shares < p['min_v']: continue
             
-            # 預算均線 (利用 Pandas 向量化優勢)
-            ma = {str(m): prices.rolling(m).mean().iloc[-1] for m in [5, 10, 20, 60, 120, 240]}
-            ma_prev = {str(m): prices.rolling(m).mean().iloc[-5] for m in [60, 120]}
+            # 2. 預算均線 (向量化提取最後一筆)
+            # 計算 5, 10, 20, 60, 120, 240 MA
+            ma_5 = prices.rolling(5).mean().iloc[-1]
+            ma_10 = prices.rolling(10).mean().iloc[-1]
+            ma_20 = prices.rolling(20).mean().iloc[-1]
+            ma_60 = prices.rolling(60).mean().iloc[-1]
+            ma_120 = prices.rolling(120).mean().iloc[-1]
+            ma_240 = prices.rolling(240).mean().iloc[-1]
             
-            # B1. 策略：量縮糾結
+            # 3. 策略分支判斷
+            
+            # --- 模式 A: 💎 量縮糾結 ---
             if mode == "💎 量縮糾結":
+                # 條件 1: 量縮比 (今日量 / 20日均量)
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
                 if v_ratio > p['vol_ratio']: continue
                 
-                ma_list = list(ma.values())
+                # 條件 2: 六線糾結度 (5,10,20,60,120,240)
+                ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
                 ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
+                if ma_gap > p['gap']: continue
                 
-                # 均線糾結度篩選 + 靠近主要均線支撐
-                supports = [ma['20'], ma['60'], ma['120']]
-                if ma_gap <= p['gap'] and any(abs(close_p / s - 1) < 0.035 for s in supports):
-                    hits.append({"代號": s, "現價": round(close_p, 2), "糾結%": round(ma_gap, 2), "量縮比": round(v_ratio, 2), "張數": int(shares)})
+                # 條件 3: 價格靠近 月/季/半年線 支撐 (3.5% 誤差)
+                supports = [ma_20, ma_60, ma_120]
+                is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
+                if not is_near_support: continue
+                
+                hits.append({
+                    "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
+                    "現價": round(close_p, 2), "糾結%": round(ma_gap, 2), 
+                    "量縮比": round(v_ratio, 2), "張數": int(shares)
+                })
 
-            # B2. 策略：量縮回測
+            # --- 模式 B: 🌀 量縮回測 ---
             elif mode == "🌀 量縮回測":
-                # 1. 趨勢向上 & 乖離控制
-                if ma['60'] < ma_prev['60'] or ma['120'] < ma_prev['120']: continue
-                long_gap = (max([ma['60'], ma['120'], ma['240']]) / min([ma['60'], ma['120'], ma['240']]) - 1) * 100
+                # 條件 1: 季線(60) & 半年線(120) 趨勢向上 (比較今日與5日前)
+                ma_60_prev = prices.rolling(60).mean().iloc[-6]
+                ma_120_prev = prices.rolling(120).mean().iloc[-6]
+                if ma_60 < ma_60_prev or ma_120 < ma_120_prev: continue
+                
+                # 條件 2: 長線乖離控制 (60, 120, 240MA 距離需在 8% 內)
+                long_mas = [ma_60, ma_120, ma_240]
+                long_gap = (max(long_mas) / min(long_mas) - 1) * 100
                 if long_gap > 8.0: continue
                 
-                # 2. 靠近支撐 & 短線糾結 & 量縮
-                v_ratio = vol_today / avg_v20
-                short_gap = (max([ma['5'], ma['10'], ma['20']]) / min([ma['5'], ma['10'], ma['20']]) - 1) * 100
+                # 條件 3: 短線 (5,10,20) 糾結度
+                short_mas = [ma_5, ma_10, ma_20]
+                short_gap = (max(short_mas) / min(short_mas) - 1) * 100
+                if short_gap > p['short_gap']: continue
                 
-                if abs(close_p/ma['60']-1) < 0.03 or abs(close_p/ma['120']-1) < 0.03:
-                    if short_gap <= p['short_gap'] and v_ratio <= p['vol_ratio']:
-                        rank = "多頭排列" if ma['60'] > ma['120'] > ma['240'] else "落後補漲"
-                        hits.append({"代號": s, "現價": round(close_p, 2), "短糾%": round(short_gap, 2), "量縮比": round(v_ratio, 2), "張數": int(shares), "位階": rank})
-        except: continue
+                # 條件 4: 量縮比
+                avg_v20 = volumes.tail(20).mean()
+                v_ratio = vol_today / avg_v20
+                if v_ratio > p['vol_ratio']: continue
+                
+                # 條件 5: 價格需貼近 季線 或 半年線 (3% 誤差)
+                if abs(close_p/ma_60 - 1) < 0.03 or abs(close_p/ma_120 - 1) < 0.03:
+                    rank = "多頭排列" if ma_60 > ma_120 > ma_240 else "落後補漲"
+                    hits.append({
+                        "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
+                        "現價": round(close_p, 2), "短糾%": round(short_gap, 2), 
+                        "量縮比": round(v_ratio, 2), "張數": int(shares), "位階": rank
+                    })
+
+        except Exception:
+            continue
+            
+    # 清除監控 UI
+    status_txt.empty()
+    prog_bar.empty()
+    hit_count_txt.empty()
+    
     return pd.DataFrame(hits)
 
 
