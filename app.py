@@ -146,7 +146,7 @@ with tab4:
         def robust_check():
             try:
                 time.sleep(0.5) 
-                test_ticker = "2330.TW"
+                test_ticker = "2317.TW"
                 
                 # 1. 只保留最核心參數，移除可能導致意外關鍵字錯誤的參數
                 raw_data = yf.download(
