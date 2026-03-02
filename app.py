@@ -13,9 +13,9 @@ from plotly.subplots import make_subplots
 import datetime
 
 # --- 1. 系統初始化 ---
-st.set_page_config(page_title="AI 飆股診斷 v7.2", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="AI 飆股診斷 v7.3", layout="wide", page_icon="🛡️")
 
-for key in ['v72_results', 'raw_json', 'rep_date', 'backtest_df']:
+for key in ['v73_results', 'raw_json', 'rep_date', 'backtest_df']:
     if key not in st.session_state: st.session_state[key] = None
 
 try:
