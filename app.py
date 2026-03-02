@@ -113,18 +113,13 @@ def show_diagnosis(ticker, name):
 tab1, tab2, tab3, tab4 = st.tabs(["📄 週報提取", "📈 績效回測", "📚 雲端資料庫", "⚡ 策略偵測器"])
 
 with tab4:
-    st.subheader("⚡ 策略偵測器")
-    
-    # A. 選擇策略模式
-    st.write("#### 1. 選擇策略模式")
+   st.subheader("⚡ 策略偵測器")
     strat_mode = st.segmented_control("目前執行策略", ["💎 量縮糾結", "🚀 帶量突破"], default="💎 量縮糾結")
     
-    # B. 根據模式顯示對應參數
-    st.write("#### 2. 調整策略參數")
-    p_col1, p_col2, p_col3 = st.columns(3)
-    
-    params = {}
-    params['min_v'] = p_col1.number_input("最低日成交量 (張)", value=300)
+    col_a, col_b, col_c = st.columns(3)
+    p_min_v = col_a.number_input("最低日成交量 (張)", value=300)
+    p_gap = col_b.slider("均線糾結度 (%)", 1.0, 10.0, 5.0)
+    p_vol = col_c.slider("量縮窒息比", 0.1, 1.0, 0.6)
 
     if strat_mode == "💎 量縮糾結":
         params['gap'] = p_col2.slider("均線糾結度 (%)", 1.0, 10.0, 5.5)
