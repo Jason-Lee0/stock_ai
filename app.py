@@ -173,13 +173,33 @@ with tab2:
 with tab3:
     st.subheader("📚 雲端監控庫內容")
     st.dataframe(db, use_container_width=True, hide_index=True)
-
 with tab4:
     st.subheader("⚡ 飆股 DNA 高階偵測")
-    
-    # 手機優化控制項
+
+    # --- 🔍 數據健康檢查區 (新增) ---
+    with st.container(border=True):
+        c_check1, c_check2 = st.columns([1, 3])
+        # 以台積電作為數據連線測試標竿
+        test_ticker = "2330.TW"
+        try:
+            # 抓取最後 2 天資料來對照
+            check_df = yf.Ticker(test_ticker).history(period="2d")
+            if not check_df.empty:
+                last_price = round(check_df['Close'].iloc[-1], 1)
+                last_date = check_df.index[-1].strftime('%Y-%m-%d %H:%M')
+                c_check1.metric("數據連線", "✅ 正常")
+                c_check2.write(f"📊 **最新收盤基準**：`{last_date}`")
+                c_check2.write(f"💰 **台積電基準價**：`{last_price}` (確認數據源最新狀態)")
+            else:
+                c_check1.metric("數據連線", "❌ 異常")
+                c_check2.error("目前無法從 Yahoo Finance 取得資料，請檢查網路。")
+        except:
+            st.warning("⚠️ 數據檢查暫時無法執行，但不影響掃描功能。")
+    # ------------------------------
+
+    # (原本的切換按鈕與參數設定...)
     mode = st.segmented_control("掃描範圍", ["全台股", "資料庫"], default="全台股")
-    
+
     with st.expander("🛠️ 進階篩選參數 (手機建議預設)", expanded=False):
         use_bias = st.toggle("開啟季年線位階篩選", value=True)
         bias_range = st.slider("季年乖離區間 (%)", -30, 60, (-10, 25), disabled=not use_bias)
