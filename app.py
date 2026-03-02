@@ -29,67 +29,75 @@ except:
 
 def check_strategy_logic(ticker, strategy_mode, params):
     """
-    策略轉接器：根據選擇的模式執行對應邏輯
+    修正重點：確保每個 ticker 進來時，產生的結果字典是完全獨立的
     """
     try:
+        # 下載數據 (強韌模式)
         df = yf.download(ticker, period="450d", interval="1d", progress=False)
         if df is None or df.empty or len(df) < 250: return None
+        
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-        df = df.dropna(subset=['Close'])
-        df = df[df['Volume'] > 0]
         
-        last = df.iloc[-1]
-        close = df['Close']
-        vol = df['Volume']
-        vol_ma20 = vol.rolling(20).mean().iloc[-1]
+        df = df.dropna(subset=['Close'])
+        last = df.iloc[-1].copy() # 使用 copy 確保資料獨立
+        close_series = df['Close']
+        vol_ma20 = df['Volume'].rolling(20).mean().iloc[-1]
+        
         current_shares = last['Volume'] / 1000
-
-        # 通用：基礎成交量門檻
         if current_shares < params['min_v']: return None
 
-        # --- 策略 A：量縮糾結 (潛伏) ---
+        # --- 策略 A：量縮糾結 ---
         if strategy_mode == "💎 量縮糾結":
-            # 1. 量縮判定
-            if (last['Volume'] / vol_ma20) > params['vol_ratio']: return None
-            # 2. 糾結判定 (六線: 5,10,20,60,120,240)
-            ma_list = [close.rolling(p).mean().iloc[-1] for p in [5,10,20,60,120,240]]
-            ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
-            if ma_gap > params['gap']: return None
+            v_ratio = last['Volume'] / vol_ma20
+            if v_ratio > params['vol_ratio']: return None
             
-            return {
-                "代號": ticker, "名稱": twstock.codes.get(re.search(r'\d{4}', ticker).group(0)).name,
-                "現價": round(float(last['Close']), 2), "糾結度(%)": round(ma_gap, 2),
-                "量縮比": round(last['Volume']/vol_ma20, 2), "今日張數": int(current_shares), "狀態": "潛伏中"
-            }
-
-        # --- 策略 B：帶量突破 (開發中預留) ---
+            # 計算六線糾結
+            ma_values = [close_series.rolling(p).mean().iloc[-1] for p in [5,10,20,60,120,240]]
+            ma_gap = (max(ma_values) / min(ma_values) - 1) * 100
+            
+            if ma_gap <= params['gap']:
+                # 抓取名稱
+                sid = re.search(r'\d{4}', ticker).group(0)
+                name = twstock.codes.get(sid).name if twstock.codes.get(sid) else "未知"
+                
+                # 回傳明確的資料結構
+                return {
+                    "代號": str(ticker),
+                    "名稱": str(name),
+                    "現價": round(float(last['Close']), 2),
+                    "糾結度(%)": round(float(ma_gap), 2),
+                    "量縮比": round(float(v_ratio), 2),
+                    "今日張數": int(current_shares)
+                }
+        
+        # --- 策略 B：帶量突破 (預留) ---
         elif strategy_mode == "🚀 帶量突破":
-            # 這裡之後可以寫：量比 > 2.5 且 股價突破 20MA 或 60MA
-            # 目前僅作為示意，可回傳空值或簡易邏輯
-            if (last['Volume'] / vol_ma20) < 2.5: return None
-            if last['Close'] < close.rolling(20).mean().iloc[-1]: return None
-            return {
-                "代號": ticker, "名稱": "突破股", "現價": round(float(last['Close']), 2),
-                "量比": round(last['Volume']/vol_ma20, 2), "今日張數": int(current_shares), "狀態": "攻擊發動"
-            }
+            v_ratio = last['Volume'] / vol_ma20
+            if v_ratio >= 2.5 and last['Close'] > close_series.rolling(20).mean().iloc[-1]:
+                sid = re.search(r'\d{4}', ticker).group(0)
+                name = twstock.codes.get(sid).name if twstock.codes.get(sid) else "未知"
+                return {
+                    "代號": str(ticker), "名稱": str(name), "現價": round(float(last['Close']), 2),
+                    "量比": round(float(v_ratio), 2), "今日張數": int(current_shares)
+                }
+    except:
+        return None
+    return None
 
-    except: return None
-
-# --- 3. 診斷 K 線圖 (同 v7.1) ---
-@st.dialog("📈 量價診斷", width="large")
+# --- 3. 診斷視窗 ---
+@st.dialog("📈 專業診斷報告", width="large")
 def show_diagnosis(ticker, name):
     st.write(f"### {name} ({ticker})")
     df = yf.download(ticker, period="300d", progress=False)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
     
-    # 你的專屬六色均線
     ma_colors = {'MA5':'yellow','MA10':'#00BFFF','MA20':'#DA70D6','MA60':'#32CD32','MA120':'red','MA240':'#FF8C00'}
     for p, c in zip([5,10,20,60,120,240], ma_colors.values()):
         df[f'MA{p}'] = df['Close'].rolling(p).mean()
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.7, 0.3])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="K線"), row=1, col=1)
     for ma, color in ma_colors.items():
         fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=color, width=1.2)), row=1, col=1)
@@ -98,7 +106,7 @@ def show_diagnosis(ticker, name):
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="成交量", marker_color=vol_colors), row=2, col=1)
     
     fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- 4. UI 介面 ---
 
@@ -130,27 +138,47 @@ with tab4:
     
     if st.button("🏁 執行策略掃描", width='stretch', type="primary"):
         # 準備代號列表 (省略重複邏輯...)
-        all_tickers = [f"{c}.TW" if i.market=="上市" else f"{c}.TWO" for c, i in twstock.codes.items() if c.isdigit() and len(c)==4 and "ETF" not in i.type]
+        all_codes = twstock.codes
+        all_tickers = [f"{c}.TW" if i.market=="上市" else f"{c}.TWO" for c, i in all_codes.items() if c.isdigit() and len(c)==4]
         
+        params = {'min_v': p_min_v, 'gap': p_gap, 'vol_ratio': p_vol}
         hits = []
         prog = st.progress(0)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-            futures = {ex.submit(check_strategy_logic, t, strat_mode, params): t for t in all_tickers}
-            for i, f in enumerate(concurrent.futures.as_completed(futures)):
-                res = f.result()
-                if res: hits.append(res)
-                if i % 25 == 0: prog.progress((i+1)/len(all_tickers))
         
-        st.session_state.v72_results = pd.DataFrame(hits)
-        st.success(f"掃描完成！發現 {len(hits)} 檔符合『{strat_mode}』標的。")
+        # 使用執行緒池
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            # 關鍵：將參數打包進去，避免參考同一個記憶體位址
+            future_to_ticker = {executor.submit(check_strategy_logic, t, strat_mode, params): t for t in all_tickers}
+            for i, future in enumerate(concurrent.futures.as_completed(future_to_ticker)):
+                result = future.result()
+                if result:
+                    hits.append(result)
+                if i % 30 == 0:
+                    prog.progress((i+1)/len(all_tickers))
+        
+        # 儲存結果並強制轉換為 DataFrame
+        st.session_state.v73_results = pd.DataFrame(hits)
+        st.success(f"掃描完成！發現 {len(hits)} 檔標的。")
 
-    # D. 顯示結果
-    if st.session_state.v72_results is not None and not st.session_state.v72_results.empty:
-        df_display = st.session_state.v72_results
-        event = st.dataframe(df_display, on_select="rerun", selection_mode="single-row", hide_index=True, width='stretch')
-        if event.selection.rows:
-            target = df_display.iloc[event.selection.rows[0]]
-            show_diagnosis(target['代號'], target['名稱'])
+    # 顯示結果
+    if st.session_state.v73_results is not None and not st.session_state.v73_results.empty:
+        # 修正：顯示前先根據糾結度排序，並重設索引避免選取錯誤
+        df_final = st.session_state.v73_results.sort_values("糾結度(%)").reset_index(drop=True)
+        
+        st.info("💡 點擊下方列查看 K 線圖。")
+        selection = st.dataframe(
+            df_final, 
+            on_select="rerun", 
+            selection_mode="single-row", 
+            hide_index=True, 
+            use_container_width=True
+        )
+        
+        # 修正彈窗對象抓取
+        if selection.selection.rows:
+            selected_row_index = selection.selection.rows[0]
+            target_stock = df_final.iloc[selected_row_index]
+            show_diagnosis(target_stock['代號'], target_stock['名稱'])
 
 # --- 4. 主介面分頁區 ---
 
