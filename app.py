@@ -142,32 +142,32 @@ with tab4:
         c_status, c_info, c_btn = st.columns([1, 2, 1])
         
         # --- 強化抓取函數 ---
+       # --- 強化修復版抓取函數 ---
         def robust_check():
             try:
-                # 1. 使用隨機延遲，避免 API 碰撞
                 time.sleep(0.5) 
-                
-                # 2. 強制設定下載參數 (不使用進度條，開啟自動對應)
                 test_ticker = "2330.TW"
+                
+                # 1. 只保留最核心參數，移除可能導致意外關鍵字錯誤的參數
                 raw_data = yf.download(
                     test_ticker, 
                     period="5d", 
                     interval="1d", 
-                    progress=False, 
-                    show_errors=False,
-                    auto_adjust=True # 自動處理除權息，讓數據更純淨
+                    progress=False
                 )
                 
-                if raw_data.empty:
-                    # 備援方案：改用 yf.Ticker 抓取
-                    raw_data = yf.Ticker(test_ticker).history(period="5d")
+                # 2. 如果 download 還是失敗，嘗試最原始的 Ticker 抓取
+                if raw_data is None or raw_data.empty:
+                    st.write("嘗試備援連線...")
+                    stock = yf.Ticker(test_ticker)
+                    raw_data = stock.history(period="5d")
 
                 if not raw_data.empty:
-                    # 3. 處理 MultiIndex 索引
+                    # 3. 徹底處理 MultiIndex (2026 必備)
                     if isinstance(raw_data.columns, pd.MultiIndex):
-                        raw_data.columns = raw_data.columns.get_level_values(0)
+                        raw_data.columns = [col[0] if isinstance(col, tuple) else col for col in raw_data.columns]
                     
-                    # 4. 關鍵：排除最新但尚未成交的「空盤資料」(NaN)
+                    # 4. 清洗 NaN 資料
                     valid_data = raw_data.dropna(subset=['Close'])
                     valid_data = valid_data[valid_data['Volume'] > 0]
                     
@@ -178,9 +178,10 @@ with tab4:
                             "date": valid_data.index[-1].strftime('%Y-%m-%d'),
                             "price": float(last_row['Close'])
                         }
-                return {"status": "❌ 失敗", "date": "無資料", "price": 0}
+                return {"status": "❌ 失敗", "date": "連線被拒絕", "price": 0}
             except Exception as e:
-                return {"status": "🚫 錯誤", "date": str(e)[:20], "price": 0}
+                # 顯示實際錯誤原因
+                return {"status": "🚫 錯誤", "date": f"指令錯誤: {str(e)}", "price": 0}
 
         # 執行檢查
         res = robust_check()
