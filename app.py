@@ -29,10 +29,10 @@ except Exception as e:
 
 # --- 2. 核心策略邏輯 (穩定循序掃描版) ---
 
-def check_stock_strategy(ticker, mode, p):
+def check_stock_v83(ticker, mode, p):
     try:
-        df = yf.download(ticker, period="400d", interval="1d", progress=False)
-        if df is None or len(df) < 240: return None
+        df = yf.download(ticker, period="450d", interval="1d", progress=False)
+        if df is None or len(df) < 250: return None
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
         df = df.dropna(subset=['Close']).copy()
@@ -43,35 +43,59 @@ def check_stock_strategy(ticker, mode, p):
         avg_vol_20 = df['Volume'].tail(20).mean()
         shares = vol_today / 1000
 
+        # 基礎過濾：張數
         if shares < p['min_v']: return None
 
+        # 預計算均線 (5, 10, 20, 60, 120, 240)
+        ma_vals = {str(m): df['Close'].rolling(m).mean().iloc[-1] for m in [5, 10, 20, 60, 120, 240]}
+        ma_prev = {str(m): df['Close'].rolling(m).mean().iloc[-5] for m in [60, 120]} # 5天前
+        
+        # --- 策略 1：💎 量縮糾結 (長線大底) ---
         if mode == "💎 量縮糾結":
-            # 條件 1: 量縮比
             v_ratio = vol_today / avg_vol_20
             if v_ratio > p['vol_ratio']: return None
             
-            # 條件 2: 六線糾結度 (5,10,20,60,120,240)
-            ma_vals = {str(m): df['Close'].rolling(m).mean().iloc[-1] for m in [5,10,20,60,120,240]}
             ma_list = list(ma_vals.values())
             ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
             if ma_gap > p['gap']: return None
-
-            # 條件 3: 靠近月/季/半年線支撐 (3.5% 緩衝)
+            
+            # 必須靠近 月/季/半年線 其中之一 (3.5% 誤差)
             supports = [ma_vals['20'], ma_vals['60'], ma_vals['120']]
-            dist = [abs(close_p / s - 1) for s in supports]
-            if not any(d < 0.035 for d in dist): return None
+            if not any(abs(close_p / s - 1) < 0.035 for s in supports): return None
 
-            sid = re.search(r'\d{4}', ticker).group(0)
-            name = twstock.codes.get(sid).name if twstock.codes.get(sid) else "未知"
-            return {"代號": ticker, "名稱": name, "現價": round(close_p, 2), "糾結度%": round(ma_gap, 2), "量縮比": round(v_ratio, 2), "張數": int(shares)}
+            return {"代號": ticker, "名稱": twstock.codes.get(ticker[:4]).name, "現價": round(close_p, 2), "糾結%": round(ma_gap, 2), "量縮比": round(v_ratio, 2), "張數": int(shares), "型態": "大底糾結"}
 
-        elif mode == "🚀 帶量突破":
-            # 預留開發：目前簡單定義為量比 > 3 且站上月線
+        # --- 策略 2：🌀 量縮回測 (支撐找點) ---
+        elif mode == "🌀 量縮回測":
+            # 1. 季線/半年線上揚判定
+            if ma_vals['60'] < ma_prev['60'] or ma_vals['120'] < ma_prev['120']: return None
+            
+            # 2. 季/半年/年線 乖離不可過大 (控制在 8% 內，避免追高)
+            long_mas = [ma_vals['60'], ma_vals['120'], ma_vals['240']]
+            long_gap = (max(long_mas) / min(long_mas) - 1) * 100
+            if long_gap > 8.0: return None
+            
+            # 3. 收盤價靠近 季線或半年線 (3% 誤差)
+            if not (abs(close_p / ma_vals['60'] - 1) < 0.03 or abs(close_p / ma_vals['120'] - 1) < 0.03): return None
+            
+            # 4. 短線 5/10/20 糾結 (等待噴發)
+            short_mas = [ma_vals['5'], ma_vals['10'], ma_vals['20']]
+            short_gap = (max(short_mas) / min(short_mas) - 1) * 100
+            if short_gap > p['short_gap']: return None
+            
+            # 5. 成交量量縮
             v_ratio = vol_today / avg_vol_20
-            ma20 = df['Close'].rolling(20).mean().iloc[-1]
-            if v_ratio > 3.0 and close_p > ma20:
-                sid = re.search(r'\d{4}', ticker).group(0)
-                return {"代號": ticker, "名稱": "突破股", "現價": round(close_p, 2), "量比": round(v_ratio, 2), "張數": int(shares)}
+            if v_ratio > p['vol_ratio']: return None
+
+            rank = "多頭排列" if ma_vals['60'] > ma_vals['120'] > ma_vals['240'] else "落後補漲"
+            return {"代號": ticker, "名稱": twstock.codes.get(ticker[:4]).name, "現價": round(close_p, 2), "短糾%": round(short_gap, 2), "量縮比": round(v_ratio, 2), "張數": int(shares), "位階": rank}
+
+        # --- 策略 3：🚀 帶量突破 ---
+        elif mode == "🚀 帶量突破":
+            v_ratio = vol_today / avg_vol_20
+            if v_ratio >= p['breakout_vol'] and close_p > ma_vals['20']:
+                return {"代號": ticker, "名稱": twstock.codes.get(ticker[:4]).name, "現價": round(close_p, 2), "量比": round(v_ratio, 2), "張數": int(shares), "狀態": "攻擊發動"}
+                
         return None
     except: return None
 
@@ -147,34 +171,52 @@ with tab3:
 
 with tab4:
     st.subheader("⚡ 策略偵測器")
-    mode = st.segmented_control("策略模式", ["💎 量縮糾結", "🚀 帶量突破"], default="💎 量縮糾結")
+    # 策略選擇切換
+    mode = st.segmented_control("策略模式", ["💎 量縮糾結", "🌀 量縮回測", "🚀 帶量突破"], default="💎 量縮回測")
     
-    with st.expander("🛠️ 參數設定", expanded=True):
+    # 動態參數設定
+    with st.expander("🛠️ 參數與篩選設定", expanded=True):
         c1, c2, c3 = st.columns(3)
         p_min_v = c1.number_input("最低張數", value=300)
         p_dict = {'min_v': p_min_v}
+        
         if mode == "💎 量縮糾結":
-            p_dict['gap'] = c2.slider("糾結度%", 1.0, 10.0, 5.0)
+            p_dict['gap'] = c2.slider("全線糾結度%", 1.0, 10.0, 5.0)
             p_dict['vol_ratio'] = c3.slider("量縮比", 0.1, 1.0, 0.6)
+            st.caption("🔍 條件：六線糾結 + 價格貼近 月/季/半年線 支撐區")
+            
+        elif mode == "🌀 量縮回測":
+            p_dict['short_gap'] = c2.slider("短線糾結% (5/10/20)", 1.0, 5.0, 3.0)
+            p_dict['vol_ratio'] = c3.slider("量縮比門檻", 0.1, 1.0, 0.5)
+            st.caption("🔍 條件：季/半年線上揚 + 均線乖離控制 + 縮量回測支撐線")
+            
         else:
             p_dict['breakout_vol'] = c2.slider("量比倍數", 2.0, 5.0, 3.5)
+            st.caption("🔍 條件：今日成交量爆發 + 股價站上 20MA 月線")
 
+    # 執行與結果顯示 (邏輯維持穩定循序掃描)
     if st.button("🏁 開始執行掃描", type="primary", use_container_width=True):
         all_tickers = [f"{c}.TW" if i.market=="上市" else f"{c}.TWO" for c, i in twstock.codes.items() if c.isdigit() and len(c)==4]
-        # 測試時可限制數量: all_tickers = all_tickers[:100]
         hits = []
         bar = st.progress(0)
-        for i, t in enumerate(all_tickers):
-            res = check_stock_strategy(t, mode, p_dict)
-            if res: hits.append(res)
-            if i % 20 == 0: bar.progress((i+1)/len(all_tickers))
-        st.session_state.scan_results = pd.DataFrame(hits)
-
-    if st.session_state.scan_results is not None and not st.session_state.scan_results.empty:
-        sort_col = "糾結度%" if mode == "💎 量縮糾結" else "量比"
-        df_final = st.session_state.scan_results.sort_values(sort_col).reset_index(drop=True)
-        sel = st.dataframe(df_final, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True)
+        status = st.empty()
         
+        # 為了手機操作流暢，建議限制掃描總量或增加進度提示
+        total = len(all_tickers)
+        for i, t in enumerate(all_tickers):
+            res = check_stock_v83(t, mode, p_dict)
+            if res: hits.append(res)
+            if i % 25 == 0: 
+                bar.progress((i+1)/total)
+                status.text(f"掃描中: {t} ({i+1}/{total})")
+        
+        st.session_state.scan_results = pd.DataFrame(hits)
+        status.success(f"掃描完成！發現 {len(hits)} 檔符合標的。")
+
+    # 表格點選看圖邏輯 (同前版)
+    if st.session_state.scan_results is not None and not st.session_state.scan_results.empty:
+        df_final = st.session_state.scan_results.reset_index(drop=True)
+        sel = st.dataframe(df_final, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True)
         if sel.selection.rows:
             target = df_final.iloc[sel.selection.rows[0]]
             show_diagnosis(target['代號'], target['名稱'])
