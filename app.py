@@ -22,7 +22,7 @@ for key in ['scan_results', 'raw_json', 'rep_date']:
 
 try:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
     st.error(f"連線設定錯誤: {e}")
@@ -222,12 +222,30 @@ def show_diagnosis(ticker, name):
     fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, margin=dict(l=5, r=5, t=5, b=5))
     st.plotly_chart(fig, use_container_width=True)
 
-    # Gemini AI 分析 (針對過去大量漲幅原因)
+     # 2. Gemini AI 分析區塊 (加入錯誤攔截)
     if st.button("🤖 使用 Gemini 分析漲幅原因", use_container_width=True):
-        with st.spinner("AI 正在爬梳歷史新聞與題材..."):
-            prompt = f"分析台灣股票 {name} ({ticker}) 過去一年中出現大幅漲幅的原因。請從產業地位、關鍵題材、財報表現三個面向簡潔回答。"
-            res = model.generate_content(prompt)
-            st.info(res.text)
+        with st.spinner("AI 正在分析歷史數據與新聞..."):
+            try:
+                # 建立精簡的 Prompt 以節省 Token
+                prompt = f"請簡潔分析台股 {name} ({ticker}) 過去一年的重大漲幅原因（如產業利多、題材、財報）。請用繁體中文回答。"
+                
+                # 呼叫 Gemini
+                res = model.generate_content(prompt)
+                
+                if res.text:
+                    st.info(res.text)
+                else:
+                    st.warning("AI 回傳內容為空，請稍後再試。")
+                    
+            except Exception as e:
+                # 專門攔截 429 Resource Exhausted 錯誤
+                if "429" in str(e) or "ResourceExhausted" in str(e):
+                    st.error("⚠️ AI 服務目前配額已滿（免費版限制）。請等候 60 秒後再點擊一次，或是今天請稍作休息。")
+                else:
+                    st.error(f"發生非預期錯誤: {e}")
+
+    # 提供一個手動查詢連結作為備案
+    st.markdown(f"🔗 [查看 Yahoo 股市新聞 - {name}](https://tw.stock.yahoo.com/quote/{ticker[:4]}/news)")
 
 # --- 4. 主介面分頁規劃 ---
 
