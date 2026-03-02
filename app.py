@@ -137,25 +137,65 @@ except:
     db = pd.DataFrame(columns=['日期', '標的', '題材', '原因'])
 
 with tab4:
-    st.subheader("⚡ 數據健康檢查")
+    st.subheader("⚡ 數據連線檢查")
     with st.container(border=True):
         c_status, c_info, c_btn = st.columns([1, 2, 1])
-        try:
-            # 以 2330 作為測試連線標竿
-            check_df = yf.download("2330.TW", period="3d", progress=False, show_errors=False)
-            if not check_df.empty:
-                if isinstance(check_df.columns, pd.MultiIndex): check_df.columns = check_df.columns.get_level_values(0)
-                v_df = check_df[check_df['Volume'] > 0]
-                if not v_df.empty:
-                    c_status.metric("數據連線", "✅ 正常")
-                    c_info.write(f"📅 **基準日**：`{v_df.index[-1].strftime('%Y-%m-%d')}`")
-                    c_info.write(f"💰 **收盤基準**：`{float(v_df['Close'].iloc[-1])}`")
-                else: c_status.metric("數據連線", "⚠️ 假日")
-            else: c_status.metric("數據連線", "❌ 失敗")
-        except: c_status.metric("數據連線", "🚫 錯誤")
         
-        if c_btn.button("🔄 重新連線測試", width='stretch'): st.rerun()
+        # --- 強化抓取函數 ---
+        def robust_check():
+            try:
+                # 1. 使用隨機延遲，避免 API 碰撞
+                time.sleep(0.5) 
+                
+                # 2. 強制設定下載參數 (不使用進度條，開啟自動對應)
+                test_ticker = "2330.TW"
+                raw_data = yf.download(
+                    test_ticker, 
+                    period="5d", 
+                    interval="1d", 
+                    progress=False, 
+                    show_errors=False,
+                    auto_adjust=True # 自動處理除權息，讓數據更純淨
+                )
+                
+                if raw_data.empty:
+                    # 備援方案：改用 yf.Ticker 抓取
+                    raw_data = yf.Ticker(test_ticker).history(period="5d")
 
+                if not raw_data.empty:
+                    # 3. 處理 MultiIndex 索引
+                    if isinstance(raw_data.columns, pd.MultiIndex):
+                        raw_data.columns = raw_data.columns.get_level_values(0)
+                    
+                    # 4. 關鍵：排除最新但尚未成交的「空盤資料」(NaN)
+                    valid_data = raw_data.dropna(subset=['Close'])
+                    valid_data = valid_data[valid_data['Volume'] > 0]
+                    
+                    if not valid_data.empty:
+                        last_row = valid_data.iloc[-1]
+                        return {
+                            "status": "✅ 正常",
+                            "date": valid_data.index[-1].strftime('%Y-%m-%d'),
+                            "price": float(last_row['Close'])
+                        }
+                return {"status": "❌ 失敗", "date": "無資料", "price": 0}
+            except Exception as e:
+                return {"status": "🚫 錯誤", "date": str(e)[:20], "price": 0}
+
+        # 執行檢查
+        res = robust_check()
+        
+        c_status.metric("數據連線", res["status"])
+        if res["status"] == "✅ 正常":
+            c_info.write(f"📅 **基準交易日**：`{res['date']}`")
+            c_info.write(f"💰 **台積電基準**：`{res['price']}`")
+        else:
+            c_info.error(f"連線異常：{res['date']}。請嘗試重新測試或檢查網路。")
+        
+        if c_btn.button("🔄 重新測試連線", width='stretch'):
+            # 清除快取並重新載入
+            st.cache_data.clear()
+            st.rerun()
     st.write("---")
     mode = st.segmented_control("掃描範圍", ["全台股", "資料庫"], default="全台股")
     
