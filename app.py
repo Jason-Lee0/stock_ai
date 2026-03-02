@@ -176,25 +176,45 @@ with tab3:
 with tab4:
     st.subheader("⚡ 飆股 DNA 高階偵測")
 
-    # --- 🔍 數據健康檢查區 (新增) ---
+    # --- 🔍 數據健康檢查儀表板 ---
     with st.container(border=True):
-        c_check1, c_check2 = st.columns([1, 3])
-        # 以台積電作為數據連線測試標竿
-        test_ticker = "2330.TW"
+        c_status, c_info, c_btn = st.columns([1, 2, 1])
+        
+        test_sid = "2330.TW"
         try:
-            # 抓取最後 2 天資料來對照
-            check_df = yf.Ticker(test_ticker).history(period="2d")
+            # 使用 download 抓取最近 3 天資料，這比 history(period="1d") 更穩定
+            check_df = yf.download(test_sid, period="3d", progress=False, show_errors=False)
+            
             if not check_df.empty:
-                last_price = round(check_df['Close'].iloc[-1], 1)
-                last_date = check_df.index[-1].strftime('%Y-%m-%d %H:%M')
-                c_check1.metric("數據連線", "✅ 正常")
-                c_check2.write(f"📊 **最新收盤基準**：`{last_date}`")
-                c_check2.write(f"💰 **台積電基準價**：`{last_price}` (確認數據源最新狀態)")
+                # 強制處理 MultiIndex 索引問題
+                if isinstance(check_df.columns, pd.MultiIndex):
+                    check_df.columns = check_df.columns.get_level_values(0)
+                
+                # 過濾掉無交易量的日子（如週末或連假）
+                valid_df = check_df[check_df['Volume'] > 0]
+                
+                if not valid_df.empty:
+                    last_row = valid_df.iloc[-1]
+                    last_price = float(last_row['Close'])
+                    last_date = valid_df.index[-1].strftime('%Y-%m-%d')
+                    
+                    c_status.metric("數據連線", "✅ 正常")
+                    c_info.write(f"📅 **基準交易日**：`{last_date}`")
+                    c_info.write(f"💰 **台積電收盤**：`{last_price:.1f}`")
+                else:
+                    c_status.metric("數據連線", "⚠️ 假日")
+                    c_info.warning("目前抓取到的是非交易日數據。")
             else:
-                c_check1.metric("數據連線", "❌ 異常")
-                c_check2.error("目前無法從 Yahoo Finance 取得資料，請檢查網路。")
-        except:
-            st.warning("⚠️ 數據檢查暫時無法執行，但不影響掃描功能。")
+                c_status.metric("數據連線", "❌ 失敗")
+                c_info.error("無法取得數據，請檢查 API 限制。")
+        
+        except Exception as e:
+            c_status.metric("數據連線", "🚫 錯誤")
+            c_info.info("連線異常，請嘗試重新測試。")
+
+        # 重新測試按鈕
+        if c_btn.button("🔄 重新測試連線", use_container_width=True):
+            st.rerun()
     # ------------------------------
 
     # (原本的切換按鈕與參數設定...)
