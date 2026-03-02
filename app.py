@@ -113,7 +113,7 @@ def show_diagnosis(ticker, name):
 tab1, tab2, tab3, tab4 = st.tabs(["📄 週報提取", "📈 績效回測", "📚 雲端資料庫", "⚡ 策略偵測器"])
 
 with tab4:
-   st.subheader("⚡ 策略偵測器")
+    st.subheader("⚡ 策略偵測器")
     strat_mode = st.segmented_control("目前執行策略", ["💎 量縮糾結", "🚀 帶量突破"], default="💎 量縮糾結")
     
     col_a, col_b, col_c = st.columns(3)
