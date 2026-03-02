@@ -209,6 +209,7 @@ with tab4:
                 c_info.error("無法取得數據，請檢查 API 限制。")
         
         except Exception as e:
+            print(e)
             c_status.metric("數據連線", "🚫 錯誤")
             c_info.info("連線異常，請嘗試重新測試。")
 
