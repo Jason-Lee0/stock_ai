@@ -157,36 +157,48 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 })
 
             # --- 模式 B: 🌀 量縮回測 ---
-            elif mode == "🌀 量縮回測":
-                # 條件 1: 季線(60) & 半年線(120) 趨勢向上 (比較今日與5日前)
+           elif mode == "🌀 量縮回測":
+                # 取得各項均線數值 (今天與5日前)
+                # ma_5, ma_10, ma_20, ma_60, ma_120, ma_240 已在前方計算完成
+                
+                # 條件 1: 季線(60) & 半年線(120) 趨勢向上
                 ma_60_prev = prices.rolling(60).mean().iloc[-6]
                 ma_120_prev = prices.rolling(120).mean().iloc[-6]
                 if ma_60 < ma_60_prev or ma_120 < ma_120_prev: continue
                 
-                # 條件 2: 長線乖離控制 (60, 120, 240MA 距離需在 8% 內)
+                # 條件 2: 價格必須「站在月線之上」 (解決你提到的等待期太長問題)
+                if close_p < ma_20: continue
+                
+                # 條件 3: 中長期乖離控制 (60, 120, 240MA 距離需在 8% 內)
                 long_mas = [ma_60, ma_120, ma_240]
                 long_gap = (max(long_mas) / min(long_mas) - 1) * 100
                 if long_gap > 8.0: continue
                 
-                # 條件 3: 短線 (5,10,20) 糾結度
-                short_mas = [ma_5, ma_10, ma_20]
-                short_gap = (max(short_mas) / min(short_mas) - 1) * 100
-                if short_gap > p['short_gap']: continue
+                # 條件 4: 進階糾結度 (5, 10, 20, 60MA 四線同時糾結)
+                # 既然要季線糾結，我們把 60MA 也納入糾結計算範圍
+                congest_mas = [ma_5, ma_10, ma_20, ma_60]
+                congest_gap = (max(congest_mas) / min(congest_mas) - 1) * 100
+                if congest_gap > p['short_gap']: continue
                 
-                # 條件 4: 量縮比
+                # 條件 5: 量縮比 (20日均量內縮)
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
                 if v_ratio > p['vol_ratio']: continue
                 
-                # 條件 5: 價格需貼近 季線 或 半年線 (3% 誤差)
-                if abs(close_p/ma_60 - 1) < 0.03 or abs(close_p/ma_120 - 1) < 0.03:
+                # 條件 6: 價格需貼近 季線 或 半年線 (3.5% 誤差)
+                # 因為已要求站上月線，這時若能同時靠近季線，就是極致的支撐區
+                if abs(close_p/ma_60 - 1) < 0.035 or abs(close_p/ma_120 - 1) < 0.035:
                     rank = "多頭排列" if ma_60 > ma_120 > ma_240 else "落後補漲"
                     hits.append({
-                        "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
-                        "現價": round(close_p, 2), "短糾%": round(short_gap, 2), 
-                        "量縮比": round(v_ratio, 2), "張數": int(shares), "位階": rank
+                        "代號": s, 
+                        "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
+                        "現價": round(close_p, 2), 
+                        "均線糾結%": round(congest_gap, 2), # 這裡改成顯示四線糾結
+                        "量縮比": round(v_ratio, 2), 
+                        "張數": int(shares), 
+                        "位階": rank,
+                        "狀態": "站上月線強勢"
                     })
-
         except Exception:
             continue
             
