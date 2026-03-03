@@ -157,7 +157,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 })
 
             # --- 模式 B: 🌀 量縮回測 ---
-           elif mode == "🌀 量縮回測":
+            elif mode == "🌀 量縮回測":
                 # 取得各項均線數值 (今天與5日前)
                 # ma_5, ma_10, ma_20, ma_60, ma_120, ma_240 已在前方計算完成
                 
