@@ -188,11 +188,11 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # --- 條件 5: 極致量縮 ---
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
-                if v_ratio > p['vol_ratio']: continue
+                if v_ratio < p['vol_ratio']:
                 
                 # --- 條件 6: 支撐位階判定 ---
                 # 價格需貼近 季線 或 半年線 (3.5% 誤差) 
-                if abs(close_p/ma_60 - 1) < 0.035 or abs(close_p/ma_120 - 1) < 0.035:
+                # if abs(close_p/ma_60 - 1) < 0.035 or abs(close_p/ma_120 - 1) < 0.035:
                     rank = "強勢多頭" if ma_20 > ma_60 > ma_120 else "整理轉強"
                     hits.append({
                         "代號": s, 
