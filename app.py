@@ -158,46 +158,51 @@ def run_strategy_engine(df_c, df_v, mode, p):
 
             # --- 模式 B: 🌀 量縮回測 ---
             elif mode == "🌀 量縮回測":
+             
                 # 取得各項均線數值 (今天與5日前)
-                # ma_5, ma_10, ma_20, ma_60, ma_120, ma_240 已在前方計算完成
+                # ma_5, ma_10, ma_20, ma_60, ma_120, ma_240 已在前方計算
                 
-                # 條件 1: 季線(60) & 半年線(120) 趨勢向上
-                ma_60_prev = prices.rolling(60).mean().iloc[-6]
-                ma_120_prev = prices.rolling(120).mean().iloc[-6]
-                if ma_60 < ma_60_prev or ma_120 < ma_120_prev: continue
+                # --- 條件 1: 短/中長期趨勢保護 ---
+                ma_20_prev = prices.rolling(20).mean().iloc[-6]   # 5天前月線
+                ma_60_prev = prices.rolling(60).mean().iloc[-6]   # 5天前季線
                 
-                # 條件 2: 價格必須「站在月線之上」 (解決你提到的等待期太長問題)
+                # 修正：月線必須上揚 且 季線上揚 (雙重趨勢保護)
+                if ma_20 < ma_20_prev or ma_60 < ma_60_prev: continue
+                
+                # --- 條件 2: 價格必須「站上月線」 ---
+                # 確保短線動能恢復，排除月線下的弱勢整理
                 if close_p < ma_20: continue
                 
-                # 條件 3: 中長期乖離控制 (60, 120, 240MA 距離需在 8% 內)
+                # --- 條件 3: 長線乖離控制 ---
+                # 60, 120, 240MA 距離需在 8% 內，避免追逐過度噴發的股票
                 long_mas = [ma_60, ma_120, ma_240]
                 long_gap = (max(long_mas) / min(long_mas) - 1) * 100
                 if long_gap > 8.0: continue
                 
-                # 條件 4: 進階糾結度 (5, 10, 20, 60MA 四線同時糾結)
-                # 既然要季線糾結，我們把 60MA 也納入糾結計算範圍
+                # --- 條件 4: 四線糾結度 (5, 10, 20, 60MA) ---
+                # 股價站在月線上，且這四條線黏得很緊，代表變盤在即
                 congest_mas = [ma_5, ma_10, ma_20, ma_60]
                 congest_gap = (max(congest_mas) / min(congest_mas) - 1) * 100
                 if congest_gap > p['short_gap']: continue
                 
-                # 條件 5: 量縮比 (20日均量內縮)
+                # --- 條件 5: 極致量縮 ---
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
                 if v_ratio > p['vol_ratio']: continue
                 
-                # 條件 6: 價格需貼近 季線 或 半年線 (3.5% 誤差)
-                # 因為已要求站上月線，這時若能同時靠近季線，就是極致的支撐區
+                # --- 條件 6: 支撐位階判定 ---
+                # 價格需貼近 季線 或 半年線 (3.5% 誤差) 
                 if abs(close_p/ma_60 - 1) < 0.035 or abs(close_p/ma_120 - 1) < 0.035:
-                    rank = "多頭排列" if ma_60 > ma_120 > ma_240 else "落後補漲"
+                    rank = "強勢多頭" if ma_20 > ma_60 > ma_120 else "整理轉強"
                     hits.append({
                         "代號": s, 
                         "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
                         "現價": round(close_p, 2), 
-                        "均線糾結%": round(congest_gap, 2), # 這裡改成顯示四線糾結
+                        "均線糾結%": round(congest_gap, 2), 
                         "量縮比": round(v_ratio, 2), 
                         "張數": int(shares), 
-                        "位階": rank,
-                        "狀態": "站上月線強勢"
+                        "位階趨勢": rank,
+                        "提醒": "月線助漲中"
                     })
         except Exception:
             continue
