@@ -218,11 +218,11 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # --- 2. 漲幅條件 (應用 p['min_up']) ---
                 # 必須收盤價 > 月線(20MA) 且 漲幅 > 參數設定 (例如 3.5%)
                 price_change = (close_p / df['Close'].iloc[-2] - 1) * 100
-                if close_p < ma_10 or price_change < p['min_up']: continue
+                if close_p < ma_20 or price_change < p['min_up']: continue
     
                 # --- 3. 乖離率控制 (應用 p['max_bias']) ---
                 # 避免追逐離年線(240MA)太遠的股票，防止接到最後一棒
-                bias_240 = (close_p / ma_240 - 1) * 100
+                bias_240 = abs((close_p / ma_240 - 1) * 100)
                 if bias_240 > p['max_bias']: continue
     
                 # --- 4. K線型態：上影線過濾 (固定 50% 邏輯) ---
