@@ -177,7 +177,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # 60, 120, 240MA 距離需在 8% 內，避免追逐過度噴發的股票
                 long_mas = [ma_60, ma_120, ma_240]
                 long_gap = (max(long_mas) / min(long_mas) - 1) * 100
-                if long_gap > 8.0: continue
+                if long_gap > p['long_bias']: continue
                 
                 # --- 條件 4: 四線糾結度 (5, 10, 20, 60MA) ---
                 # 股價站在月線上，且這四條線黏得很緊，代表變盤在即
@@ -383,6 +383,7 @@ with tab4:
             elif mode == "🌀 量縮回測":
                 p_dict['short_gap'] = c_b.slider("短線糾結 % (5/10/20/60)", 1.0, 5.0, 3.0)
                 p_dict['vol_ratio'] = c_c.slider("量縮比門檻", 0.1, 1.0, 0.5)
+                p_dict['long_bias'] = c_d.slider("長線容許乖離率", 5.0,20.0,8.0)
             elif mode == "🚀 帶量突破":
                 p_dict['breakout_vol'] = c_b.slider("量比倍數 (vs 20MA)", 2.0, 8.0, 3.0)
                 p_dict['min_up'] = c_c.slider("最低要求漲幅 (%)", 1.0, 7.0, 3.5)
