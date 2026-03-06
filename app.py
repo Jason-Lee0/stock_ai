@@ -373,7 +373,7 @@ with tab4:
         mode = st.segmented_control("策略模式", strategy_options, default="🌀 量縮回測")
         
         with st.expander("🛠️ 參數設定", expanded=True):
-            c_a, c_b, c_c = st.columns(3)
+            c_a, c_b, c_c, c_d = st.columns(4)
             p_min_v = c_a.number_input("最低張數", value=300)
             p_dict = {'min_v': p_min_v}
             
@@ -384,9 +384,9 @@ with tab4:
                 p_dict['short_gap'] = c_b.slider("短線糾結 %", 1.0, 5.0, 3.0)
                 p_dict['vol_ratio'] = c_c.slider("量縮比門檻", 0.1, 1.0, 0.5)
             elif mode == "🚀 帶量突破":
-                p['breakout_vol'] = c2.slider("量比倍數 (vs 20MA)", 2.0, 8.0, 3.0)
-                p['min_up'] = c3.slider("最低要求漲幅 (%)", 1.0, 7.0, 3.5)
-                p['max_bias'] = c1.slider("噴發乖離限制 (%)", 10.0, 50.0, 25.0, help="股價/年線 比率上限")
+                p_dict['breakout_vol'] = c_b.slider("量比倍數 (vs 20MA)", 2.0, 8.0, 3.0)
+                p_dict['min_up'] = c_c.slider("最低要求漲幅 (%)", 1.0, 7.0, 3.5)
+                p_dict['max_bias'] = c_d.slider("噴發乖離限制 (%)", 10.0, 50.0, 25.0, help="股價/年線 比率上限")
 
         # --- 關鍵：手動篩選按鈕 ---
         if st.button("🎯 執行策略篩選", type="primary", use_container_width=True):
