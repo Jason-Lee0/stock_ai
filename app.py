@@ -236,12 +236,12 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 if close_p <= open_p: continue # 排除假紅棒
     
                 # --- 5. 前置糾結過濾 (確保是整理後的首根) ---
-                # 檢查 5 天前的 5/10/20MA 糾結度是否在 6% 內
+                # 檢查 5 天前的 5/10/20MA 糾結度是否在設定參數內
                 ma_5_p = df['Close'].rolling(5).mean().iloc[-6]
                 ma_10_p = df['Close'].rolling(10).mean().iloc[-6]
                 ma_20_p = df['Close'].rolling(20).mean().iloc[-6]
                 prev_gap = (max([ma_5_p, ma_10_p, ma_20_p]) / min([ma_5_p, ma_10_p, ma_20_p]) - 1) * 100
-                if prev_gap > 6.0: continue
+                if prev_gap > p['short_gap'] : continue
     
                 # --- 通過測試，輸出結果 ---
                 hits.append({
@@ -373,7 +373,7 @@ with tab4:
         mode = st.segmented_control("策略模式", strategy_options, default="🌀 量縮回測")
         
         with st.expander("🛠️ 參數設定", expanded=True):
-            c_a, c_b, c_c, c_d = st.columns(4)
+            c_a, c_b, c_c, c_d, c_e = st.columns(5)
             p_min_v = c_a.number_input("最低張數", value=300)
             p_dict = {'min_v': p_min_v}
             
@@ -381,12 +381,13 @@ with tab4:
                 p_dict['gap'] = c_b.slider("糾結度門檻 %", 1.0, 8.0, 4.5)
                 p_dict['vol_ratio'] = c_c.slider("量縮比門檻", 0.1, 1.0, 0.5)
             elif mode == "🌀 量縮回測":
-                p_dict['short_gap'] = c_b.slider("短線糾結 %", 1.0, 5.0, 3.0)
+                p_dict['short_gap'] = c_b.slider("短線糾結 % (5/10/20/60)", 1.0, 5.0, 3.0)
                 p_dict['vol_ratio'] = c_c.slider("量縮比門檻", 0.1, 1.0, 0.5)
             elif mode == "🚀 帶量突破":
                 p_dict['breakout_vol'] = c_b.slider("量比倍數 (vs 20MA)", 2.0, 8.0, 3.0)
                 p_dict['min_up'] = c_c.slider("最低要求漲幅 (%)", 1.0, 7.0, 3.5)
                 p_dict['max_bias'] = c_d.slider("噴發乖離限制 (%)", 10.0, 50.0, 25.0, help="股價/年線 比率上限")
+                p_dict['short_gap'] = c_e.slider("短線糾結 % (5/10/20)", 1.0, 10.0, 3.0)
 
         # --- 關鍵：手動篩選按鈕 ---
         if st.button("🎯 執行策略篩選", type="primary", use_container_width=True):
