@@ -205,53 +205,54 @@ def run_strategy_engine(df_c, df_v, mode, p):
                         "提醒": "月線助漲中"
                     })
             elif mode == "🚀 帶量突破":
-                
-                # --- 1. 量能結構過濾 ---
+                # --- 1. 絕對張數與相對量比 (應用 p['min_v'] 與 p['breakout_vol']) ---
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
-                # 門檻：量比需達標 (參數 p['breakout_vol']) 且 今日需大於 1000 張避免流動性風險
-                if v_ratio < p['breakout_vol'] or shares < 1000: continue
-                # 過濾「異常爆量」：量比超過 10 倍通常是短線過熱或主力對倒出貨，危險性高
+                
+                # 條件：今日成交量 > 設定張數 且 量比 > 設定倍數
+                if shares < p['min_v'] or v_ratio < p['breakout_vol']: continue
+                
+                # 過濾極端異常爆量 (防範主力對倒，固定設定 10 倍)
                 if v_ratio > 10.0: continue 
     
-                # --- 2. 價格動能與位階 ---
-                # 漲幅需 > 3% 確保是實體紅棒，且收盤價必須站在月線(20MA)之上
+                # --- 2. 漲幅條件 (應用 p['min_up']) ---
+                # 必須收盤價 > 月線(20MA) 且 漲幅 > 參數設定 (例如 3.5%)
                 price_change = (close_p / df['Close'].iloc[-2] - 1) * 100
-                if price_change < 3.0 or close_p < ma_20: continue
+                if close_p < ma_20 or price_change < p['min_up']: continue
     
-                # --- 3. K線型態：上影線過濾 (防當沖出貨) ---
+                # --- 3. 乖離率控制 (應用 p['max_bias']) ---
+                # 避免追逐離年線(240MA)太遠的股票，防止接到最後一棒
+                bias_240 = (close_p / ma_240 - 1) * 100
+                if bias_240 > p['max_bias']: continue
+    
+                # --- 4. K線型態：上影線過濾 (固定 50% 邏輯) ---
                 high_p = float(last['High'])
                 open_p = float(last['Open'])
-                upper_shadow = high_p - close_p   # 上影線長度
-                body_length = close_p - open_p    # 實體紅棒長度
+                upper_shadow = high_p - close_p
+                body_length = close_p - open_p
                 
-                # 關鍵：若上影線 > 實體長度的 50%，代表衝高回落壓力大，不入選
+                # 若上影線超過實體的一半，代表衝高回落壓力大
                 if body_length > 0 and (upper_shadow / body_length) > 0.5: continue
-                # 若是開高走低的黑棒或假紅棒，直接排除
-                if close_p <= open_p: continue
+                if close_p <= open_p: continue # 排除假紅棒
     
-                # --- 4. 前置糾結過濾 (確保是「第一根」突破) ---
-                # 檢查 5 天前，5/10/20MA 是否糾結在 6% 內 (確保不是已經噴發三根才去追)
+                # --- 5. 前置糾結過濾 (確保是整理後的首根) ---
+                # 檢查 5 天前的 5/10/20MA 糾結度是否在 6% 內
                 ma_5_p = df['Close'].rolling(5).mean().iloc[-6]
                 ma_10_p = df['Close'].rolling(10).mean().iloc[-6]
                 ma_20_p = df['Close'].rolling(20).mean().iloc[-6]
                 prev_gap = (max([ma_5_p, ma_10_p, ma_20_p]) / min([ma_5_p, ma_10_p, ma_20_p]) - 1) * 100
                 if prev_gap > 6.0: continue
     
-                # --- 5. 長線乖離控制 ---
-                # 股價離年線(240MA) 太遠不追，避免 FOMO 風險 (乖離 > 25% 排除)
-                if close_p / ma_240 > 1.25: continue
-    
-                # --- 通過所有考驗，收錄標的 ---
+                # --- 通過測試，輸出結果 ---
                 hits.append({
                     "代號": s, 
                     "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
                     "現價": round(close_p, 2), 
                     "漲幅%": round(price_change, 2),
                     "量比": round(v_ratio, 2), 
+                    "乖離%": round(bias_240, 1),
                     "張數": int(shares),
-                    "上影線比": round(upper_shadow / body_length, 2) if body_length > 0 else 0,
-                    "狀態": "🚀 帶量起漲"
+                    "狀態": "🚀 帶量突破"
                 })
         except Exception:
             continue
@@ -383,7 +384,9 @@ with tab4:
                 p_dict['short_gap'] = c_b.slider("短線糾結 %", 1.0, 5.0, 3.0)
                 p_dict['vol_ratio'] = c_c.slider("量縮比門檻", 0.1, 1.0, 0.5)
             elif mode == "🚀 帶量突破":
-                p_dict['breakout_vol'] = c_b.slider("量比倍數", 2.0, 5.0, 3.5)
+                p['breakout_vol'] = c2.slider("量比倍數 (vs 20MA)", 2.0, 8.0, 3.0)
+                p['min_up'] = c3.slider("最低要求漲幅 (%)", 1.0, 7.0, 3.5)
+                p['max_bias'] = c1.slider("噴發乖離限制 (%)", 10.0, 50.0, 25.0, help="股價/年線 比率上限")
 
         # --- 關鍵：手動篩選按鈕 ---
         if st.button("🎯 執行策略篩選", type="primary", use_container_width=True):
