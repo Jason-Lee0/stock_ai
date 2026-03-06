@@ -210,7 +210,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 v_ratio = vol_today / avg_v20
                 
                 # 條件：今日成交量 > 設定張數 且 量比 > 設定倍數
-                if shares < p['min_v'] or v_ratio < p['breakout_vol']: continue
+                if shares < p['min_v'] : continue
                 
                 # 過濾極端異常爆量 (防範主力對倒，固定設定 10 倍)
                 if v_ratio > 10.0: continue 
