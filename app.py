@@ -204,6 +204,55 @@ def run_strategy_engine(df_c, df_v, mode, p):
                         "位階趨勢": rank,
                         "提醒": "月線助漲中"
                     })
+            elif mode == "🚀 帶量突破":
+                
+                # --- 1. 量能結構過濾 ---
+                avg_v20 = volumes.tail(20).mean()
+                v_ratio = vol_today / avg_v20
+                # 門檻：量比需達標 (參數 p['breakout_vol']) 且 今日需大於 1000 張避免流動性風險
+                if v_ratio < p['breakout_vol'] or shares < 1000: continue
+                # 過濾「異常爆量」：量比超過 10 倍通常是短線過熱或主力對倒出貨，危險性高
+                if v_ratio > 10.0: continue 
+    
+                # --- 2. 價格動能與位階 ---
+                # 漲幅需 > 3% 確保是實體紅棒，且收盤價必須站在月線(20MA)之上
+                price_change = (close_p / df['Close'].iloc[-2] - 1) * 100
+                if price_change < 3.0 or close_p < ma_20: continue
+    
+                # --- 3. K線型態：上影線過濾 (防當沖出貨) ---
+                high_p = float(last['High'])
+                open_p = float(last['Open'])
+                upper_shadow = high_p - close_p   # 上影線長度
+                body_length = close_p - open_p    # 實體紅棒長度
+                
+                # 關鍵：若上影線 > 實體長度的 50%，代表衝高回落壓力大，不入選
+                if body_length > 0 and (upper_shadow / body_length) > 0.5: continue
+                # 若是開高走低的黑棒或假紅棒，直接排除
+                if close_p <= open_p: continue
+    
+                # --- 4. 前置糾結過濾 (確保是「第一根」突破) ---
+                # 檢查 5 天前，5/10/20MA 是否糾結在 6% 內 (確保不是已經噴發三根才去追)
+                ma_5_p = df['Close'].rolling(5).mean().iloc[-6]
+                ma_10_p = df['Close'].rolling(10).mean().iloc[-6]
+                ma_20_p = df['Close'].rolling(20).mean().iloc[-6]
+                prev_gap = (max([ma_5_p, ma_10_p, ma_20_p]) / min([ma_5_p, ma_10_p, ma_20_p]) - 1) * 100
+                if prev_gap > 6.0: continue
+    
+                # --- 5. 長線乖離控制 ---
+                # 股價離年線(240MA) 太遠不追，避免 FOMO 風險 (乖離 > 25% 排除)
+                if close_p / ma_240 > 1.25: continue
+    
+                # --- 通過所有考驗，收錄標的 ---
+                hits.append({
+                    "代號": s, 
+                    "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
+                    "現價": round(close_p, 2), 
+                    "漲幅%": round(price_change, 2),
+                    "量比": round(v_ratio, 2), 
+                    "張數": int(shares),
+                    "上影線比": round(upper_shadow / body_length, 2) if body_length > 0 else 0,
+                    "狀態": "🚀 帶量起漲"
+                })
         except Exception:
             continue
             
