@@ -167,7 +167,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 ma_60_prev = prices.rolling(60).mean().iloc[-6]   # 5天前季線
                 
                 # 修正：月線必須上揚 且 季線上揚 (雙重趨勢保護)
-                if ma_20 < ma_20_prev or ma_60 < ma_60_prev: continue
+                if  ma_60 < ma_60_prev: continue
                 
                 # --- 條件 2: 價格必須「站上月線」 ---
                 # 確保短線動能恢復，排除月線下的弱勢整理
@@ -181,18 +181,18 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 
                 # --- 條件 4: 四線糾結度 (5, 10, 20, 60MA) ---
                 # 股價站在月線上，且這四條線黏得很緊，代表變盤在即
-                congest_mas = [ma_5, ma_10, ma_20, ma_60]
+                congest_mas = [ma_5, ma_10, ma_20]
                 congest_gap = (max(congest_mas) / min(congest_mas) - 1) * 100
                 if congest_gap > p['short_gap']: continue
                 
                 # --- 條件 5: 極致量縮 ---
                 avg_v20 = volumes.tail(20).mean()
                 v_ratio = vol_today / avg_v20
-                if v_ratio < p['vol_ratio']:
+                if v_ratio > p['vol_ratio']:continue
                 
                 # --- 條件 6: 支撐位階判定 ---
                 # 價格需貼近 季線 或 半年線 (3.5% 誤差) 
-                # if abs(close_p/ma_60 - 1) < 0.035 or abs(close_p/ma_120 - 1) < 0.035:
+                if abs(close_p/ma_20 - 1) < 0.035 :
                     rank = "強勢多頭" if ma_20 > ma_60 > ma_120 > ma_240 else "整理轉強"
                     hits.append({
                         "代號": s, 
