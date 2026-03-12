@@ -167,7 +167,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 ma_60_prev = prices.rolling(60).mean().iloc[-6]   # 5天前季線
                 
                 # 修正：月線必須上揚 且 季線上揚 (雙重趨勢保護)
-                if  ma_20 < ma_20_prev && ma_60 < ma_60_prev: continue
+                if  ma_20 < ma_20_prev and ma_60 < ma_60_prev: continue
                 
                 # --- 條件 2: 價格必須「站上月線」 ---
                 # 確保短線動能恢復，排除月線下的弱勢整理
