@@ -30,7 +30,7 @@ except Exception as e:
 
 def sync_market_to_gsheets(conn, all_tickers):
     """
-    抓取全台股 450 天數據，轉成寬表並存入 Google Sheets
+    抓取全台股 730 天數據，轉成寬表並存入 Google Sheets
     """
     st.warning("📡 正在從 Yahoo 下載全市場 450 天數據，這需要約 3-5 分鐘...")
     
@@ -42,7 +42,7 @@ def sync_market_to_gsheets(conn, all_tickers):
     prog = st.progress(0)
     for i in range(0, len(all_tickers), batch_size):
         batch = all_tickers[i : i + batch_size]
-        data = yf.download(batch, period="450d", interval="1d", progress=False)
+        data = yf.download(batch, period="730d", interval="1d", progress=False)  # 約 2.5 年歷史 + 60 天報酬
         
         if isinstance(data.columns, pd.MultiIndex):
             batch_close = data['Close']
@@ -80,6 +80,176 @@ def load_cached_market_data(_conn):
         return None, None
 
 # --- 2. 策略計算邏輯 (純記憶體運算，速度極快) ---
+# ====================== 【新增】共用策略訊號判斷函數 ======================
+def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: dict, idx: int = -1) -> tuple[bool, dict]:
+    """
+    單一交易日策略條件檢查（當日掃描 + 歷史回測共用）
+    返回 (是否觸發, 額外資訊字典)
+    """
+    try:
+        if len(prices) < 240 or idx < 240:
+            return False, {}
+        
+        close_p = float(prices.iloc[idx])
+        vol_today = float(volumes.iloc[idx])
+        shares = vol_today / 1000
+        if shares < p.get('min_v', 300):
+            return False, {}
+        
+        # 計算均線
+        ma_5 = prices.rolling(5).mean().iloc[idx]
+        ma_10 = prices.rolling(10).mean().iloc[idx]
+        ma_20 = prices.rolling(20).mean().iloc[idx]
+        ma_60 = prices.rolling(60).mean().iloc[idx]
+        ma_120 = prices.rolling(120).mean().iloc[idx]
+        ma_240 = prices.rolling(240).mean().iloc[idx]
+        
+        info = {"現價": round(close_p, 2), "張數": int(shares)}
+        
+        # ==================== 模式 A: 💎 量縮糾結 ====================
+        if mode == "💎 量縮糾結":
+            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
+            v_ratio = vol_today / avg_v20
+            if v_ratio > p.get('vol_ratio', 0.5):
+                return False, {}
+            
+            ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
+            ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
+            if ma_gap > p.get('gap', 4.5):
+                return False, {}
+            
+            supports = [ma_20, ma_60, ma_120]
+            if not any(abs(close_p / s - 1) < 0.035 for s in supports):
+                return False, {}
+            
+            info.update({"糾結%": round(ma_gap, 2), "量縮比": round(v_ratio, 2)})
+            return True, info
+        
+        # ==================== 模式 B: 🌀 量縮回測 ====================
+        elif mode == "🌀 量縮回測":
+            # 5天前均線（趨勢保護）
+            ma_20_prev = prices.rolling(20).mean().iloc[idx-5]
+            ma_60_prev = prices.rolling(60).mean().iloc[idx-5]
+            if ma_20 < ma_20_prev or ma_60 < ma_60_prev:
+                return False, {}
+            
+            # 長線乖離
+            long_mas = [ma_60, ma_120, ma_240]
+            long_gap = (max(long_mas) / min(long_mas) - 1) * 100
+            if long_gap > p.get('long_bias', 8.0):
+                return False, {}
+            
+            # 短線糾結
+            congest_mas = [ma_5, ma_10, ma_20]
+            congest_gap = (max(congest_mas) / min(congest_mas) - 1) * 100
+            if congest_gap > p.get('short_gap', 3.0):
+                return False, {}
+            
+            # 量縮
+            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
+            v_ratio = vol_today / avg_v20
+            if v_ratio > p.get('vol_ratio', 0.5):
+                return False, {}
+            
+            info.update({
+                "均線糾結%": round(congest_gap, 2),
+                "量縮比": round(v_ratio, 2),
+                "位階趨勢": "強勢多頭" if ma_20 > ma_60 > ma_120 > ma_240 else "整理轉強"
+            })
+            return True, info
+        
+        # ==================== 模式 C: 🚀 帶量突破 ====================
+        elif mode == "🚀 帶量突破":
+            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
+            v_ratio = vol_today / avg_v20
+            if shares < p.get('min_v', 300) or v_ratio > 10.0:
+                return False, {}
+            
+            prev_close = prices.iloc[idx-1]
+            price_change = (close_p / prev_close - 1) * 100
+            if close_p < ma_20 or price_change < p.get('min_up', 3.5):
+                return False, {}
+            
+            bias_240 = abs((close_p / ma_240 - 1) * 100)
+            if bias_240 > p.get('max_bias', 25.0):
+                return False, {}
+            
+            # 前置糾結過濾（簡化版，你可再加強）
+            ma_5_p = prices.rolling(5).mean().iloc[idx-6]
+            ma_10_p = prices.rolling(10).mean().iloc[idx-6]
+            ma_20_p = prices.rolling(20).mean().iloc[idx-6]
+            prev_gap = (max([ma_5_p, ma_10_p, ma_20_p]) / min([ma_5_p, ma_10_p, ma_20_p]) - 1) * 100
+            if prev_gap > p.get('short_gap', 3.0):
+                return False, {}
+            
+            info.update({
+                "漲幅%": round(price_change, 2),
+                "量比": round(v_ratio, 2),
+                "乖離%": round(bias_240, 1)
+            })
+            return True, info
+        
+        return False, {}
+    
+    except Exception:
+        return False, {}
+
+
+# ====================== 【新增】歷史回測主引擎 ======================
+@st.cache_data(ttl=3600)
+def run_backtest(df_c, df_v, mode, p, backtest_years=2):
+    """對台股所有標的進行 2 年歷史回測"""
+    signals = []
+    days = int(backtest_years * 252)  # 約交易日數
+    
+    prog_bar = st.progress(0)
+    status_txt = st.empty()
+    total_symbols = len(df_c.columns)
+    
+    for i, s in enumerate(df_c.columns):
+        if i % 30 == 0:  # 每 30 檔更新一次 UI
+            status_txt.text(f"🔄 正在回測: {s} ({i+1}/{total_symbols})")
+            prog_bar.progress((i + 1) / total_symbols)
+        
+        try:
+            prices = df_c[s].dropna()
+            volumes = df_v[s].dropna()
+            if len(prices) < days + 120:
+                continue
+                
+            start_idx = max(240, len(prices) - days)
+            
+            for t in range(start_idx, len(prices) - 65):  # 預留 60 天 + 緩衝
+                is_signal, info = check_strategy_signal(prices, volumes, mode, p, idx=t)
+                if is_signal:
+                    close_today = prices.iloc[t]
+                    signal_date = prices.index[t]
+                    
+                    # 計算 5/10/20/60 天後漲幅
+                    ret = {}
+                    for d in [5, 10, 20, 60]:
+                        if t + d < len(prices):
+                            future_p = prices.iloc[t + d]
+                            ret[f"+{d}天漲幅%"] = round((future_p / close_today - 1) * 100, 2)
+                        else:
+                            ret[f"+{d}天漲幅%"] = None
+                    
+                    signals.append({
+                        "代號": s,
+                        "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
+                        "訊號日期": signal_date.strftime('%Y-%m-%d'),
+                        "現價": info.get("現價", round(close_today, 2)),
+                        **ret,
+                        **{k: v for k, v in info.items() if k not in ["現價", "張數"]}
+                    })
+        except:
+            continue
+    
+    prog_bar.empty()
+    status_txt.empty()
+    
+    return pd.DataFrame(signals)
+
 
 def run_strategy_engine(df_c, df_v, mode, p):
     """
@@ -391,12 +561,19 @@ with tab4:
                 p_dict['short_gap'] = c_e.slider("短線糾結 % (5/10/20)", 1.0, 10.0, 3.0)
 
         # --- 關鍵：手動篩選按鈕 ---
-        if st.button("🎯 執行策略篩選", type="primary", use_container_width=True):
-            with st.spinner("正在從大數據矩陣過濾標的..."):
-                # 從記憶體直接運算，1800 檔通常在 1~3 秒內完成
-                results = run_strategy_engine(df_c, df_v, mode, p_dict)
-                st.session_state.scan_results = results # 存入 session 確保點選表格時數據還在
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            if st.button("🎯 執行策略篩選（當日）", type="primary", use_container_width=True):
+                with st.spinner("正在從大數據矩陣過濾標的..."):
+                    results = run_strategy_engine(df_c, df_v, mode, p_dict)
+                    st.session_state.scan_results = results
         
+        with col2:
+            if st.button("📊 執行 2 年歷史回測（全市場）", type="secondary", use_container_width=True):
+                with st.spinner("🔄 全市場 2 年回測進行中（約 40~90 秒）..."):
+                    backtest_df = run_backtest(df_c, df_v, mode, p_dict)
+                    st.session_state.backtest_results = backtest_df
+                    st.success(f"✅ 回測完成！共產生 {len(backtest_df)} 筆訊號")
         # 4. 顯示結果區
         if st.session_state.scan_results is not None:
             res_df = st.session_state.scan_results
@@ -422,6 +599,45 @@ with tab4:
                     show_diagnosis(target['代號'], target.get('名稱', '選定標的'))
             else:
                 st.warning("查無符合條件標的，請放寬參數後再次執行篩選。")
+                
+        if st.session_state.get('backtest_results') is not None:
+            bt = st.session_state.backtest_results
+            st.divider()
+            st.subheader(f"📊 {mode} 策略 — 2 年歷史回測報告（全市場）")
+            
+            if bt.empty:
+                st.warning("此參數組合在過去 2 年未產生任何訊號，請放寬條件後重試。")
+            else:
+                st.metric("總訊號次數", len(bt))
+                
+                # 績效總結（4 個期間）
+                col_a, col_b, col_c, col_d = st.columns(4)
+                for col, period in zip([col_a, col_b, col_c, col_d], ["+5天漲幅%", "+10天漲幅%", "+20天漲幅%", "+60天漲幅%"]):
+                    if period in bt.columns:
+                        rets = bt[period].dropna()
+                        with col:
+                            st.metric(
+                                period,
+                                f"{rets.mean():+.2f}%",
+                                f"勝率 {(rets > 0).mean()*100:.1f}%"
+                            )
+                
+                # 詳細訊號表
+                with st.expander("📋 查看全部歷史訊號明細", expanded=False):
+                    st.dataframe(
+                        bt.sort_values("訊號日期", ascending=False),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+                # 報酬分布圖（美觀）
+                st.subheader("📈 各持有期間報酬分布")
+                fig = go.Figure()
+                for period in ["+5天漲幅%", "+10天漲幅%", "+20天漲幅%", "+60天漲幅%"]:
+                    if period in bt.columns:
+                        fig.add_trace(go.Box(y=bt[period].dropna(), name=period))
+                fig.update_layout(yaxis_title="漲幅 (%)", template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True)
                 
     else:
         st.info("💡 尚未偵測到雲端數據。請先點擊上方按鈕執行「同步雲端行情」。")
