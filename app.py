@@ -97,12 +97,12 @@ def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: d
             return False, {}
         
         # 計算均線
-        ma_5 = prices.rolling(5).mean().iloc[idx]
-        ma_10 = prices.rolling(10).mean().iloc[idx]
-        ma_20 = prices.rolling(20).mean().iloc[idx]
-        ma_60 = prices.rolling(60).mean().iloc[idx]
-        ma_120 = prices.rolling(120).mean().iloc[idx]
-        ma_240 = prices.rolling(240).mean().iloc[idx]
+        ma_5   = prices.rolling(5).mean().iloc[idx].item()
+        ma_10  = prices.rolling(10).mean().iloc[idx].item()
+        ma_20  = prices.rolling(20).mean().iloc[idx].item()
+        ma_60  = prices.rolling(60).mean().iloc[idx].item()
+        ma_120 = prices.rolling(120).mean().iloc[idx].item()
+        ma_240 = prices.rolling(240).mean().iloc[idx].item()
         
         info = {"現價": round(close_p, 2), "張數": int(shares)}
         
@@ -128,8 +128,8 @@ def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: d
         # ==================== 模式 B: 🌀 量縮回測 ====================
         elif mode == "🌀 量縮回測":
             # 5天前均線（趨勢保護）
-            ma_20_prev = prices.rolling(20).mean().iloc[idx-5]
-            ma_60_prev = prices.rolling(60).mean().iloc[idx-5]
+            ma_20_prev = prices.rolling(20).mean().iloc[idx-5].item()
+            ma_60_prev = prices.rolling(60).mean().iloc[idx-5].item()
             if ma_20 < ma_20_prev or ma_60 < ma_60_prev:
                 return False, {}
             
@@ -146,7 +146,7 @@ def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: d
                 return False, {}
             
             # 量縮
-            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
+            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean().item()
             v_ratio = vol_today / avg_v20
             if v_ratio > p.get('vol_ratio', 0.5):
                 return False, {}
