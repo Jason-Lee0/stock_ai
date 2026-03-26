@@ -329,7 +329,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # 條件 3: 價格靠近 月支撐 (3.5% 誤差)
                 # supports = [ma_20, ma_60, ma_120]
                 # is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
-                if abs(close_p/ma_20 - 1) > 0.8 : continue
+                if abs(close_p/ma_20 - 1) > 0.08 : continue
 
                 close_p_106 = float(prices.iloc[-107])
 
