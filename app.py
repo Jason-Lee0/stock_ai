@@ -108,7 +108,7 @@ def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: d
         info = {"現價": round(close_p, 2), "張數": int(shares)}
         
         # ==================== 模式 A: 💎 量縮糾結 ====================
-        # if mode == "💎 量縮糾結":
+        if mode == "💎 量縮糾結":
         #     avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
         #     v_ratio = vol_today / avg_v20
         #     if v_ratio > p.get('vol_ratio', 0.5):
