@@ -101,32 +101,41 @@ def check_strategy_signal(prices: pd.Series, volumes: pd.Series, mode: str, p: d
         ma_10  = prices.rolling(10).mean().iloc[idx].item()
         ma_20  = prices.rolling(20).mean().iloc[idx].item()
         ma_60  = prices.rolling(60).mean().iloc[idx].item()
+        ma_105 = prices.rolling(105).mean().iloc[idx].item()
         ma_120 = prices.rolling(120).mean().iloc[idx].item()
         ma_240 = prices.rolling(240).mean().iloc[idx].item()
         
         info = {"現價": round(close_p, 2), "張數": int(shares)}
         
         # ==================== 模式 A: 💎 量縮糾結 ====================
-        if mode == "💎 量縮糾結":
-            avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
-            v_ratio = vol_today / avg_v20
-            if v_ratio > p.get('vol_ratio', 0.5):
-                return False, {}
+        # if mode == "💎 量縮糾結":
+        #     avg_v20 = volumes.iloc[max(0, idx-19):idx+1].mean()
+        #     v_ratio = vol_today / avg_v20
+        #     if v_ratio > p.get('vol_ratio', 0.5):
+        #         return False, {}
             
-            ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
-            ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
-            if ma_gap > p.get('gap', 4.5):
-                return False, {}
+        #     ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
+        #     ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
+        #     if ma_gap > p.get('gap', 4.5):
+        #         return False, {}
             
-            supports = [ma_20, ma_60, ma_120]
-            if not any(abs(close_p / s - 1) < 0.035 for s in supports):
-                return False, {}
+        #     supports = [ma_20, ma_60, ma_120]
+        #     if not any(abs(close_p / s - 1) < 0.035 for s in supports):
+        #         return False, {}
+            if ma_105 < ma_20 : 
+                return False,{}
+            
+                
+
+        
             
             info.update({"糾結%": round(ma_gap, 2), "量縮比": round(v_ratio, 2)})
             return True, info
         
         # ==================== 模式 B: 🌀 量縮回測 ====================
         elif mode == "🌀 量縮回測":
+
+            
             # 5天前均線（趨勢保護）
             ma_20_prev = prices.rolling(20).mean().iloc[idx-5].item()
             ma_60_prev = prices.rolling(60).mean().iloc[idx-5].item()
@@ -298,6 +307,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
             ma_10 = prices.rolling(10).mean().iloc[-1]
             ma_20 = prices.rolling(20).mean().iloc[-1]
             ma_60 = prices.rolling(60).mean().iloc[-1]
+            ma_105 = prices.rolling(105).mean().iloc[-1]
             ma_120 = prices.rolling(120).mean().iloc[-1]
             ma_240 = prices.rolling(240).mean().iloc[-1]
             
@@ -306,24 +316,23 @@ def run_strategy_engine(df_c, df_v, mode, p):
             # --- 模式 A: 💎 量縮糾結 ---
             if mode == "💎 量縮糾結":
                 # 條件 1: 量縮比 (今日量 / 20日均量)
-                avg_v20 = volumes.tail(20).mean()
-                v_ratio = vol_today / avg_v20
-                if v_ratio > p['vol_ratio']: continue
+                # avg_v20 = volumes.tail(20).mean()
+                # v_ratio = vol_today / avg_v20
+                # if v_ratio > p['vol_ratio']: continue
                 
                 # 條件 2: 六線糾結度 (5,10,20,60,120,240)
                 ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
                 ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
-                if ma_gap > p['gap']: continue
+                if ma_105 > ma_20: continue
                 
-                # 條件 3: 價格靠近 月/季/半年線 支撐 (3.5% 誤差)
-                supports = [ma_20, ma_60, ma_120]
-                is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
-                if not is_near_support: continue
+                # 條件 3: 價格靠近 月支撐 (3.5% 誤差)
+                # supports = [ma_20, ma_60, ma_120]
+                # is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
+                if if abs(close_p/ma_20 - 1) > 0.035 : continue
                 
                 hits.append({
                     "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
-                    "現價": round(close_p, 2), "糾結%": round(ma_gap, 2), 
-                    "量縮比": round(v_ratio, 2), "張數": int(shares)
+                    "現價": round(close_p, 2)
                 })
 
             # --- 模式 B: 🌀 量縮回測 ---
