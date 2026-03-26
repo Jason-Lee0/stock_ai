@@ -319,20 +319,27 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # avg_v20 = volumes.tail(20).mean()
                 # v_ratio = vol_today / avg_v20
                 # if v_ratio > p['vol_ratio']: continue
-                
-                # 條件 2: 六線糾結度 (5,10,20,60,120,240)
-                ma_list = [ma_5, ma_10, ma_20, ma_60, ma_120, ma_240]
-                ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
                 if ma_105 > ma_20: continue
+                    
+                # 條件 2: 六線糾結度 (5,10,20,60,120,240)
+                ma_list = [ma_20, ma_105]
+                ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
+                if ma_gap > 15 : continue
                 
                 # 條件 3: 價格靠近 月支撐 (3.5% 誤差)
                 # supports = [ma_20, ma_60, ma_120]
                 # is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
-                if abs(close_p/ma_20 - 1) > 0.035 : continue
+                if abs(close_p/ma_20 - 1) > 0.8 : continue
+
+                close_p_106 = float(prices.iloc[-107])
+
+                if close_p < close_p_106 : continue
+
+                
                 
                 hits.append({
                     "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
-                    "現價": round(close_p, 2)
+                    "現價": round(close_p, 2), "106 收盤" : round(close_p_106,2)
                 })
 
             # --- 模式 B: 🌀 量縮回測 ---
