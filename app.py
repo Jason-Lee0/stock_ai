@@ -324,12 +324,12 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # 條件 2: 六線糾結度 (5,10,20,60,120,240)
                 ma_list = [ma_20, ma_105]
                 ma_gap = (max(ma_list) / min(ma_list) - 1) * 100
-                if ma_gap > 15 : continue
+                if ma_gap > 5 : continue
                 
                 # 條件 3: 價格靠近 月支撐 (3.5% 誤差)
                 # supports = [ma_20, ma_60, ma_120]
                 # is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
-                if abs(close_p/ma_20 - 1) > 0.08 : continue
+                if abs(close_p/ma_20 - 1) > 0.05 : continue
 
                 close_p_106 = float(prices.iloc[-107])
 
