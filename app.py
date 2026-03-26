@@ -328,7 +328,7 @@ def run_strategy_engine(df_c, df_v, mode, p):
                 # 條件 3: 價格靠近 月支撐 (3.5% 誤差)
                 # supports = [ma_20, ma_60, ma_120]
                 # is_near_support = any(abs(close_p / s - 1) < 0.035 for s in supports)
-                if if abs(close_p/ma_20 - 1) > 0.035 : continue
+                if abs(close_p/ma_20 - 1) > 0.035 : continue
                 
                 hits.append({
                     "代號": s, "名稱": twstock.codes.get(s[:4]).name if twstock.codes.get(s[:4]) else "未知",
